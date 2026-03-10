@@ -1,0 +1,17 @@
+
+// this file generates many errors
+
+
+int main() {
+    int x = 5 @ 2;
+    float y = .5;
+    #bad_directive
+
+    if (x & y | 3) {
+        x = x ? 1 : 0;
+    }
+
+    value = 10 ^ 3;
+    return 0;
+}
+
