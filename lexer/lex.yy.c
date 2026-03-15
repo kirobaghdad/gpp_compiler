@@ -2186,6 +2186,9 @@ void yyerror(const char *s) {
     fprintf(stderr, "Error at line %d: %s\n", line_num, s);
 }
 
+#ifdef LEXER_STANDALONE
+YYSTYPE yylval;
+
 int main(int argc, char **argv) {
     if (argc > 1) {
         FILE *file = fopen(argv[1], "r");
@@ -2204,4 +2207,5 @@ int main(int argc, char **argv) {
     
     return 0;
 }
+#endif
 
