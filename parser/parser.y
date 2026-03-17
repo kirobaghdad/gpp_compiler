@@ -5,6 +5,8 @@
 
 #include "symbol_table.h"
 
+typedef struct ExprInfo ExprInfo;
+
 /* Provided by Flex */
 extern int yylex(void);
 extern FILE *yyin;
@@ -14,27 +16,43 @@ void yyerror(const char *s);
 
 int yyparse(void);
 
-static char *current_declaration_type = NULL;
+static TypeKind current_declaration_type = TYPE_UNKNOWN;
 static int current_declaration_is_const = 0;
 static int suppress_next_compound_scope = 0;
 static int compound_scope_entries[512];
 static int compound_scope_depth = 0;
 
-static char *copy_text(const char *text);
-static void begin_declaration(const char *type_name, int is_const);
+static void begin_declaration(TypeKind type_name, int is_const);
 static void finish_declaration(void);
-static void declare_identifier(const char *name, int is_initialized);
-static void begin_function_definition(const char *return_type, const char *name);
+static void declare_identifier(const char *name, ExprInfo initializer);
+static void begin_function_definition(TypeKind return_type, const char *name);
 static void begin_compound_scope(void);
 static void end_compound_scope(void);
+static ExprInfo make_expr(TypeKind type, int is_lvalue);
+static void report_type_mismatch(const char *context, const char *name, TypeKind target_type, TypeKind value_type);
+static ExprInfo infer_identifier_expression(const char *name);
+static ExprInfo infer_arithmetic_expression(const char *operator_name, ExprInfo left, ExprInfo right);
+static ExprInfo infer_comparison_expression(const char *operator_name, ExprInfo left, ExprInfo right);
+static ExprInfo infer_logical_expression(const char *operator_name, ExprInfo left, ExprInfo right);
 %}
 
 %define parse.error verbose
+
+%code requires {
+    #include "symbol_table.h"
+
+    typedef struct ExprInfo {
+        TypeKind type;
+        int is_lvalue;
+    } ExprInfo;
+}
 
 %union {
     int ival;
     float fval;
     char* str;
+    ExprInfo expr;
+    TypeKind type_kind;
 }
 
 %token INT_TYPE        
@@ -107,8 +125,21 @@ static void end_compound_scope(void);
 %nonassoc LOWER_THAN_ELSE
 %nonassoc ELSE
 
-%type <ival> global_initializer_opt
-%type <str> type_specifier
+%type <expr> global_initializer_opt
+%type <expr> constant_expression
+%type <expr> expression
+%type <expr> assignment_expression
+%type <expr> logical_or_expression
+%type <expr> logical_and_expression
+%type <expr> equality_expression
+%type <expr> relational_expression
+%type <expr> additive_expression
+%type <expr> multiplicative_expression
+%type <expr> unary_expression
+%type <expr> postfix_expression
+%type <expr> primary_expression
+%type <expr> literal
+%type <type_kind> type_specifier
 
 %start translation_unit
 
@@ -127,7 +158,6 @@ external_declaration
       parameter_list_opt RPAREN compound_statement
       {
           symbol_table_leave_scope();
-          free($1);
           free($2);
       }
     | type_specifier IDENTIFIER global_initializer_opt
@@ -138,7 +168,6 @@ external_declaration
       global_init_declarator_tail SEMI
       {
           finish_declaration();
-          free($1);
           free($2);
       }
     | CONST_KW type_specifier IDENTIFIER global_initializer_opt
@@ -149,7 +178,6 @@ external_declaration
       global_init_declarator_tail SEMI
       {
           finish_declaration();
-          free($2);
           free($3);
       }
     ;
@@ -157,11 +185,11 @@ external_declaration
 global_initializer_opt
     : /* empty */
       {
-          $$ = 0;
+          $$ = make_expr(TYPE_UNKNOWN, 0);
       }
     | ASSIGN expression
       {
-          $$ = 1;
+          $$ = $2;
       }
     ;
 
@@ -184,24 +212,25 @@ parameter_declaration
     : type_specifier IDENTIFIER
       {
           symbol_table_declare($2, $1, SYMBOL_PARAMETER, 1, 0, line_num);
-          free($1);
           free($2);
       }
     | type_specifier IDENTIFIER ASSIGN expression
       {
+          if (!type_can_assign($1, $4.type)) {
+              report_type_mismatch("default value", $2, $1, $4.type);
+          }
           symbol_table_declare($2, $1, SYMBOL_PARAMETER, 1, 1, line_num);
-          free($1);
           free($2);
       }
     ;
 
 type_specifier
-    : INT_TYPE    { $$ = copy_text("int"); }
-    | FLOAT_TYPE  { $$ = copy_text("float"); }
-    | DOUBLE_TYPE { $$ = copy_text("double"); }
-    | CHAR_TYPE   { $$ = copy_text("char"); }
-    | BOOL_TYPE   { $$ = copy_text("bool"); }
-    | VOID_TYPE   { $$ = copy_text("void"); }
+    : INT_TYPE    { $$ = TYPE_INT; }
+    | FLOAT_TYPE  { $$ = TYPE_FLOAT; }
+    | DOUBLE_TYPE { $$ = TYPE_DOUBLE; }
+    | CHAR_TYPE   { $$ = TYPE_CHAR; }
+    | BOOL_TYPE   { $$ = TYPE_BOOL; }
+    | VOID_TYPE   { $$ = TYPE_VOID; }
     ;
 
 declaration
@@ -212,7 +241,6 @@ declaration
       init_declarator_list
       {
           finish_declaration();
-          free($1);
       }
     | CONST_KW type_specifier
       {
@@ -221,7 +249,6 @@ declaration
       init_declarator_list
       {
           finish_declaration();
-          free($2);
       }
     ;
 
@@ -233,12 +260,12 @@ init_declarator_list
 init_declarator
     : IDENTIFIER
       {
-          declare_identifier($1, 0);
+          declare_identifier($1, make_expr(TYPE_UNKNOWN, 0));
           free($1);
       }
     | IDENTIFIER ASSIGN expression
       {
-          declare_identifier($1, 1);
+          declare_identifier($1, $3);
           free($1);
       }
     ;
@@ -327,6 +354,9 @@ case_label
 
 constant_expression
     : expression
+      {
+          $$ = $1;
+      }
     ;
 
 statement_list_opt
@@ -373,11 +403,28 @@ jump_statement
 
 expression
     : assignment_expression
+      {
+          $$ = $1;
+      }
     ;
 
 assignment_expression
     : logical_or_expression
+      {
+          $$ = $1;
+      }
     | unary_expression assignment_operator assignment_expression
+      {
+          if (!$1.is_lvalue) {
+              symbol_table_report_semantic_error("left-hand side of assignment must be assignable", NULL, line_num);
+          }
+
+          if (!type_can_assign($1.type, $3.type)) {
+              report_type_mismatch("assignment", NULL, $1.type, $3.type);
+          }
+
+          $$ = make_expr($1.type, 0);
+      }
     ;
 
 assignment_operator
@@ -391,56 +438,186 @@ assignment_operator
 
 logical_or_expression
     : logical_and_expression
+      {
+          $$ = $1;
+      }
     | logical_or_expression OR_OP logical_and_expression
+      {
+          $$ = infer_logical_expression("||", $1, $3);
+      }
     ;
 
 logical_and_expression
     : equality_expression
+      {
+          $$ = $1;
+      }
     | logical_and_expression AND_OP equality_expression
+      {
+          $$ = infer_logical_expression("&&", $1, $3);
+      }
     ;
 
 equality_expression
     : relational_expression
+      {
+          $$ = $1;
+      }
     | equality_expression EQ_OP relational_expression
+      {
+          $$ = infer_comparison_expression("==", $1, $3);
+      }
     | equality_expression NE_OP relational_expression
+      {
+          $$ = infer_comparison_expression("!=", $1, $3);
+      }
     ;
 
 relational_expression
     : additive_expression
+      {
+          $$ = $1;
+      }
     | relational_expression LT_OP additive_expression
+      {
+          $$ = infer_comparison_expression("<", $1, $3);
+      }
     | relational_expression GT_OP additive_expression
+      {
+          $$ = infer_comparison_expression(">", $1, $3);
+      }
     | relational_expression LE_OP additive_expression
+      {
+          $$ = infer_comparison_expression("<=", $1, $3);
+      }
     | relational_expression GE_OP additive_expression
+      {
+          $$ = infer_comparison_expression(">=", $1, $3);
+      }
     ;
 
 additive_expression
     : multiplicative_expression
+      {
+          $$ = $1;
+      }
     | additive_expression PLUS multiplicative_expression
+      {
+          $$ = infer_arithmetic_expression("+", $1, $3);
+      }
     | additive_expression MINUS multiplicative_expression
+      {
+          $$ = infer_arithmetic_expression("-", $1, $3);
+      }
     ;
 
 multiplicative_expression
     : unary_expression
+      {
+          $$ = $1;
+      }
     | multiplicative_expression MULT unary_expression
+      {
+          $$ = infer_arithmetic_expression("*", $1, $3);
+      }
     | multiplicative_expression DIV unary_expression
+      {
+          $$ = infer_arithmetic_expression("/", $1, $3);
+      }
     | multiplicative_expression MOD unary_expression
+      {
+          if (!type_is_integral($1.type) || !type_is_integral($3.type)) {
+              symbol_table_report_semantic_error("operator '%' requires integer operands", NULL, line_num);
+              $$ = make_expr(TYPE_ERROR, 0);
+          } else {
+              $$ = make_expr(TYPE_INT, 0);
+          }
+      }
     ;
 
 unary_expression
     : postfix_expression
+      {
+          $$ = $1;
+      }
     | INC unary_expression
+      {
+          if (!$2.is_lvalue || !type_is_numeric($2.type)) {
+              symbol_table_report_semantic_error("operator '++' requires a numeric assignable operand", NULL, line_num);
+              $$ = make_expr(TYPE_ERROR, 0);
+          } else {
+              $$ = make_expr($2.type, 0);
+          }
+      }
     | DEC unary_expression
+      {
+          if (!$2.is_lvalue || !type_is_numeric($2.type)) {
+              symbol_table_report_semantic_error("operator '--' requires a numeric assignable operand", NULL, line_num);
+              $$ = make_expr(TYPE_ERROR, 0);
+          } else {
+              $$ = make_expr($2.type, 0);
+          }
+      }
     | PLUS unary_expression
+      {
+          if (!type_is_numeric($2.type)) {
+              symbol_table_report_semantic_error("unary '+' requires a numeric operand", NULL, line_num);
+              $$ = make_expr(TYPE_ERROR, 0);
+          } else {
+              $$ = make_expr($2.type, 0);
+          }
+      }
     | MINUS unary_expression %prec UMINUS
+      {
+          if (!type_is_numeric($2.type)) {
+              symbol_table_report_semantic_error("unary '-' requires a numeric operand", NULL, line_num);
+              $$ = make_expr(TYPE_ERROR, 0);
+          } else {
+              $$ = make_expr($2.type, 0);
+          }
+      }
     | NOT_OP unary_expression
+      {
+          if (!type_is_condition($2.type)) {
+              symbol_table_report_semantic_error("operator '!' requires a boolean or numeric operand", NULL, line_num);
+              $$ = make_expr(TYPE_ERROR, 0);
+          } else {
+              $$ = make_expr(TYPE_BOOL, 0);
+          }
+      }
     ;
 
 postfix_expression
     : primary_expression
+      {
+          $$ = $1;
+      }
     | postfix_expression INC
+      {
+          if (!$1.is_lvalue || !type_is_numeric($1.type)) {
+              symbol_table_report_semantic_error("operator '++' requires a numeric assignable operand", NULL, line_num);
+              $$ = make_expr(TYPE_ERROR, 0);
+          } else {
+              $$ = make_expr($1.type, 0);
+          }
+      }
     | postfix_expression DEC
+      {
+          if (!$1.is_lvalue || !type_is_numeric($1.type)) {
+              symbol_table_report_semantic_error("operator '--' requires a numeric assignable operand", NULL, line_num);
+              $$ = make_expr(TYPE_ERROR, 0);
+          } else {
+              $$ = make_expr($1.type, 0);
+          }
+      }
     | postfix_expression LPAREN argument_expression_list_opt RPAREN
+      {
+          $$ = make_expr($1.type, 0);
+      }
     | postfix_expression LBRACKET expression RBRACKET
+      {
+          $$ = make_expr($1.type, 1);
+      }
     ;
 
 argument_expression_list_opt
@@ -456,65 +633,156 @@ argument_expression_list
 primary_expression
     : IDENTIFIER
       {
-          symbol_table_mark_used($1, line_num);
+          $$ = infer_identifier_expression($1);
           free($1);
       }
     | literal
+      {
+          $$ = $1;
+      }
     | LPAREN expression RPAREN
+      {
+          $$ = make_expr($2.type, 0);
+      }
     ;
 
 literal
     : INTEGER_LITERAL
+      {
+          $$ = make_expr(TYPE_INT, 0);
+      }
     | FLOAT_LITERAL
+      {
+          $$ = make_expr(TYPE_FLOAT, 0);
+      }
     | CHAR_LITERAL
+      {
+          $$ = make_expr(TYPE_CHAR, 0);
+      }
     | STRING_LITERAL
+      {
+          $$ = make_expr(TYPE_STRING, 0);
+      }
     | TRUE_KW
+      {
+          $$ = make_expr(TYPE_BOOL, 0);
+      }
     | FALSE_KW
+      {
+          $$ = make_expr(TYPE_BOOL, 0);
+      }
     ;
 
 %%
 
-static char *copy_text(const char *text) {
-    size_t len;
-    char *copy;
-
-    if (!text) {
-        return NULL;
-    }
-
-    len = strlen(text) + 1;
-    copy = (char *)malloc(len);
-    if (!copy) {
-        fprintf(stderr, "Out of memory while duplicating parser text.\n");
-        exit(1);
-    }
-
-    memcpy(copy, text, len);
-    return copy;
-}
-
-static void begin_declaration(const char *type_name, int is_const) {
-    free(current_declaration_type);
-    current_declaration_type = copy_text(type_name);
+static void begin_declaration(TypeKind type_name, int is_const) {
+    current_declaration_type = type_name;
     current_declaration_is_const = is_const;
 }
 
 static void finish_declaration(void) {
-    free(current_declaration_type);
-    current_declaration_type = NULL;
+    current_declaration_type = TYPE_UNKNOWN;
     current_declaration_is_const = 0;
 }
 
-static void declare_identifier(const char *name, int is_initialized) {
+static ExprInfo make_expr(TypeKind type, int is_lvalue) {
+    ExprInfo expr;
+
+    expr.type = type;
+    expr.is_lvalue = is_lvalue;
+    return expr;
+}
+
+static void report_type_mismatch(const char *context, const char *name, TypeKind target_type, TypeKind value_type) {
+    char message[256];
+
+    if (name) {
+        snprintf(
+            message,
+            sizeof(message),
+            "type mismatch in %s for '%s': expected '%s' but found '%s'",
+            context ? context : "expression",
+            name,
+            type_kind_name(target_type),
+            type_kind_name(value_type)
+        );
+    } else {
+        snprintf(
+            message,
+            sizeof(message),
+            "type mismatch in %s: expected '%s' but found '%s'",
+            context ? context : "expression",
+            type_kind_name(target_type),
+            type_kind_name(value_type)
+        );
+    }
+
+    symbol_table_report_semantic_error(message, NULL, line_num);
+}
+
+static ExprInfo infer_identifier_expression(const char *name) {
+    SymbolEntry *entry = symbol_table_lookup(name);
+
+    if (!entry) {
+        symbol_table_mark_used(name, line_num);
+        return make_expr(TYPE_ERROR, 0);
+    }
+
+    entry->is_used = 1;
+    return make_expr(entry->type_kind, entry->kind != SYMBOL_FUNCTION);
+}
+
+static ExprInfo infer_arithmetic_expression(const char *operator_name, ExprInfo left, ExprInfo right) {
+    if (!type_is_numeric(left.type) || !type_is_numeric(right.type)) {
+        char message[128];
+        snprintf(message, sizeof(message), "operator '%s' requires numeric operands", operator_name);
+        symbol_table_report_semantic_error(message, NULL, line_num);
+        return make_expr(TYPE_ERROR, 0);
+    }
+
+    return make_expr(type_common_numeric(left.type, right.type), 0);
+}
+
+static ExprInfo infer_comparison_expression(const char *operator_name, ExprInfo left, ExprInfo right) {
+    if (type_can_compare(left.type, right.type)) {
+        return make_expr(TYPE_BOOL, 0);
+    }
+
+    {
+        char message[128];
+        snprintf(message, sizeof(message), "operator '%s' requires comparable operand types", operator_name);
+        symbol_table_report_semantic_error(message, NULL, line_num);
+    }
+    return make_expr(TYPE_ERROR, 0);
+}
+
+static ExprInfo infer_logical_expression(const char *operator_name, ExprInfo left, ExprInfo right) {
+    if (!type_is_condition(left.type) || !type_is_condition(right.type)) {
+        char message[128];
+        snprintf(message, sizeof(message), "operator '%s' requires boolean or numeric operands", operator_name);
+        symbol_table_report_semantic_error(message, NULL, line_num);
+        return make_expr(TYPE_ERROR, 0);
+    }
+
+    return make_expr(TYPE_BOOL, 0);
+}
+
+static void declare_identifier(const char *name, ExprInfo initializer) {
     SymbolKind kind = current_declaration_is_const ? SYMBOL_CONSTANT : SYMBOL_VARIABLE;
+    int is_initialized = initializer.type != TYPE_UNKNOWN;
 
     if (current_declaration_is_const && !is_initialized) {
         symbol_table_report_semantic_error("constant must be initialized", name, line_num);
     }
 
+    if (initializer.type != TYPE_UNKNOWN && !type_can_assign(current_declaration_type, initializer.type)) {
+        report_type_mismatch("initialization", name, current_declaration_type, initializer.type);
+        is_initialized = 0;
+    }
+
     symbol_table_declare(
         name,
-        current_declaration_type ? current_declaration_type : "unknown",
+        current_declaration_type,
         kind,
         is_initialized,
         0,
@@ -522,7 +790,7 @@ static void declare_identifier(const char *name, int is_initialized) {
     );
 }
 
-static void begin_function_definition(const char *return_type, const char *name) {
+static void begin_function_definition(TypeKind return_type, const char *name) {
     char scope_label[256];
 
     symbol_table_declare(name, return_type, SYMBOL_FUNCTION, 1, 0, line_num);

@@ -42,6 +42,96 @@ static char *copy_text(const char *text) {
     return copy;
 }
 
+const char *type_kind_name(TypeKind type_kind) {
+    switch (type_kind) {
+        case TYPE_INT:
+            return "int";
+        case TYPE_FLOAT:
+            return "float";
+        case TYPE_DOUBLE:
+            return "double";
+        case TYPE_CHAR:
+            return "char";
+        case TYPE_BOOL:
+            return "bool";
+        case TYPE_VOID:
+            return "void";
+        case TYPE_STRING:
+            return "string";
+        case TYPE_ERROR:
+            return "error";
+        case TYPE_UNKNOWN:
+        default:
+            return "unknown";
+    }
+}
+
+int type_is_integral(TypeKind type_kind) {
+    return type_kind == TYPE_BOOL ||
+           type_kind == TYPE_CHAR ||
+           type_kind == TYPE_INT;
+}
+
+int type_is_numeric(TypeKind type_kind) {
+    return type_is_integral(type_kind) ||
+           type_kind == TYPE_FLOAT ||
+           type_kind == TYPE_DOUBLE;
+}
+
+int type_is_condition(TypeKind type_kind) {
+    return type_kind == TYPE_BOOL || type_is_numeric(type_kind);
+}
+
+int type_can_assign(TypeKind target_type, TypeKind value_type) {
+    if (target_type == TYPE_UNKNOWN || value_type == TYPE_UNKNOWN ||
+        target_type == TYPE_ERROR || value_type == TYPE_ERROR) {
+        return 1;
+    }
+
+    if (target_type == value_type) {
+        return 1;
+    }
+
+    if (target_type == TYPE_VOID || value_type == TYPE_VOID) {
+        return 0;
+    }
+
+    if (type_is_numeric(target_type) && type_is_numeric(value_type)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+int type_can_compare(TypeKind left_type, TypeKind right_type) {
+    if (left_type == TYPE_UNKNOWN || right_type == TYPE_UNKNOWN ||
+        left_type == TYPE_ERROR || right_type == TYPE_ERROR) {
+        return 1;
+    }
+
+    if (type_is_numeric(left_type) && type_is_numeric(right_type)) {
+        return 1;
+    }
+
+    return left_type == right_type && left_type != TYPE_VOID;
+}
+
+TypeKind type_common_numeric(TypeKind left_type, TypeKind right_type) {
+    if (!type_is_numeric(left_type) || !type_is_numeric(right_type)) {
+        return TYPE_ERROR;
+    }
+
+    if (left_type == TYPE_DOUBLE || right_type == TYPE_DOUBLE) {
+        return TYPE_DOUBLE;
+    }
+
+    if (left_type == TYPE_FLOAT || right_type == TYPE_FLOAT) {
+        return TYPE_FLOAT;
+    }
+
+    return TYPE_INT;
+}
+
 static const char *symbol_kind_name(SymbolKind kind) {
     switch (kind) {
         case SYMBOL_VARIABLE:
@@ -124,7 +214,6 @@ static void free_symbols(void) {
     while (entry) {
         SymbolEntry *next = entry->next_all;
         free(entry->name);
-        free(entry->type);
         free(entry->scope_name);
         free(entry);
         entry = next;
@@ -200,7 +289,7 @@ SymbolEntry *symbol_table_lookup(const char *name) {
 
 SymbolEntry *symbol_table_declare(
     const char *name,
-    const char *type,
+    TypeKind type_kind,
     SymbolKind kind,
     int is_initialized,
     int has_default_value,
@@ -226,9 +315,8 @@ SymbolEntry *symbol_table_declare(
     }
 
     entry->name = copy_text(name);
-    entry->type = copy_text(type);
-
     entry->scope_name = copy_text(current_scope->label);
+    entry->type_kind = type_kind;
     entry->kind = kind;
     entry->scope_id = current_scope->id;
     entry->scope_level = current_scope->level;
@@ -282,7 +370,7 @@ void symbol_table_dump(FILE *out) {
     while (entry) {
         fprintf(out, "%-16s %-10s %-10s %-14s %-7d %-6d %-6s %-7s %-7s\n",
                 entry->name,
-                entry->type ? entry->type : "-",
+                type_kind_name(entry->type_kind),
                 symbol_kind_name(entry->kind),
                 entry->scope_name ? entry->scope_name : "-",
                 entry->scope_level,
