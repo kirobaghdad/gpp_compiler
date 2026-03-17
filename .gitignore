@@ -1,3 +1,8 @@
 *.o
 *.html
 *.exe
+gpp_parser
+lexer/lex.yy.c
+parser/yacc_tab.c
+parser/yacc_tab.h
+parser/*.output
