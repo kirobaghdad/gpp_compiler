@@ -6,6 +6,7 @@
 extern int yylex(void);
 extern FILE *yyin;
 extern int line_num;
+extern int error_count;
 
 void yyerror(const char *s);
 
@@ -361,6 +362,10 @@ int main(int argc, char **argv) {
     }
 
     int result = yyparse();
-    return result;
-}
+    if (result == 0 && error_count == 0) {
+        printf("Parsing completed successfully.\n");
+        return 0;
+    }
 
+    return 1;
+}

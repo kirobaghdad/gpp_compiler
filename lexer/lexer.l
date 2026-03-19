@@ -6,6 +6,7 @@
 
 int line_num = 1;
 int comment_start_line = 1;
+int error_count = 0;
 
 void yyerror(const char *s);
 %}
@@ -33,6 +34,7 @@ WHITESPACE  [ \t\r]+
 <COMMENT>\n                                 { line_num++; }
 <COMMENT>.                                  { /* Consume comment text */ }
 <COMMENT><<EOF>>                            {
+                                            error_count++;
                                             printf("Lexical Error: Unterminated multi-line comment starting at line %d\n", comment_start_line);
                                             BEGIN(INITIAL);
                                             return 0;
@@ -112,13 +114,17 @@ L?\"(\\.|[^\\"])*\" { yylval.str = strdup(yytext); return STRING_LITERAL; }
 {WHITESPACE} { /* Ignore whitespace */ }
 \n          { line_num++; }
 
-.           { printf("Lexical Error: Unknown character '%s' at line %d\n", yytext, line_num); }
+.           {
+                error_count++;
+                printf("Lexical Error: Unknown character '%s' at line %d\n", yytext, line_num);
+            }
 
 %%
 
 
 
 void yyerror(const char *s) {
+    error_count++;
     fprintf(stderr, "Error at line %d: %s\n", line_num, s);
 }
 

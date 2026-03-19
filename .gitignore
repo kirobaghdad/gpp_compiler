@@ -1,3 +1,9 @@
+*
+!*.* 
+!*/
 *.o
 *.html
 *.exe
+*.yy.c
+yacc_tab.c
+yacc_tab.h
