@@ -9,9 +9,22 @@ int comment_start_line = 1;
 int error_count = 0;
 
 void yyerror(const char *s);
+
+static char *dup_lexeme(const char *text) {
+    size_t len = strlen(text) + 1;
+    char *copy = malloc(len);
+
+    if (!copy) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
+    memcpy(copy, text, len);
+    return copy;
+}
 %}
 
-%option noyywrap
+%option noyywrap noinput nounput
 %x COMMENT
 
 DIGIT       [0-9]
@@ -70,8 +83,8 @@ WHITESPACE  [ \t\r]+
 {REAL}      { yylval.fval = atof(yytext); return FLOAT_LITERAL; }
 {NUM}       { yylval.ival = atoi(yytext); return INTEGER_LITERAL; }
 
-L?'(\\.|[^\\'])+' { yylval.str = strdup(yytext); return CHAR_LITERAL; }
-L?\"(\\.|[^\\"])*\" { yylval.str = strdup(yytext); return STRING_LITERAL; }
+L?'(\\.|[^\\'])+' { yylval.str = dup_lexeme(yytext); return CHAR_LITERAL; }
+L?\"(\\.|[^\\"])*\" { yylval.str = dup_lexeme(yytext); return STRING_LITERAL; }
 
 "+"         { return PLUS; }
 "-"         { return MINUS; }
@@ -109,7 +122,7 @@ L?\"(\\.|[^\\"])*\" { yylval.str = strdup(yytext); return STRING_LITERAL; }
 ","         { return COMMA; }
 ":"         { return COLON; }
 
-{ID}        { yylval.str = strdup(yytext); return IDENTIFIER; }
+{ID}        { yylval.str = dup_lexeme(yytext); return IDENTIFIER; }
 
 {WHITESPACE} { /* Ignore whitespace */ }
 \n          { line_num++; }
