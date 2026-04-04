@@ -14,6 +14,8 @@ int yyparse(void);
 %}
 
 %define parse.error verbose
+%output "parser/yacc_tab.c"
+%defines "parser/yacc_tab.h"
 
 %union {
     int ival;
@@ -102,11 +104,20 @@ translation_unit
 
 external_declaration
     : function_definition
+    | function_declaration SEMI
     | declaration SEMI
     ;
 
+function_header
+    : type_specifier IDENTIFIER LPAREN parameter_list_opt RPAREN
+    ;
+
 function_definition
-    : type_specifier IDENTIFIER LPAREN parameter_list_opt RPAREN compound_statement
+    : function_header compound_statement
+    ;
+
+function_declaration
+    : function_header
     ;
 
 parameter_list_opt
@@ -206,7 +217,7 @@ switch_clause_list
     ;
 
 switch_clause
-    : case_label statement_list_opt
+    : case_label block_item_list_opt
     ;
 
 case_label
@@ -216,16 +227,6 @@ case_label
 
 constant_expression
     : expression
-    ;
-
-statement_list_opt
-    : /* empty */
-    | statement_list
-    ;
-
-statement_list
-    : statement
-    | statement_list statement
     ;
 
 iteration_statement
