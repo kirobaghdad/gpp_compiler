@@ -966,6 +966,12 @@ external_declaration
     : function_definition
     | function_declaration SEMI
     | declaration SEMI
+    | error SEMI
+        {
+            finish_declaration();
+            reset_pending_function_signature();
+            yyerrok;
+        }
     ;
 
 function_header
@@ -998,6 +1004,11 @@ function_declaration
 parameter_list_opt
     : /* empty */
     | parameter_list
+    | error
+        {
+            reset_pending_function_signature();
+            yyerrok;
+        }
     ;
 
 parameter_list
@@ -1065,6 +1076,11 @@ declaration
         {
             finish_declaration();
         }
+    | type_specifier error
+        {
+            finish_declaration();
+            yyerrok;
+        }
     ;
 
 init_declarator_list
@@ -1087,12 +1103,23 @@ init_declarator
             free_expr($3);
             free($1);
         }
+    | IDENTIFIER ASSIGN error
+        {
+            declare_current_variable($1, 0);
+            free($1);
+            yyerrok;
+        }
     ;
 
 compound_statement
     : scoped_lbrace block_item_list_opt RBRACE
         {
             symbol_table_leave_scope();
+        }
+    | scoped_lbrace error RBRACE
+        {
+            symbol_table_leave_scope();
+            yyerrok;
         }
     ;
 
@@ -1180,6 +1207,11 @@ if_guard
             free_expr($3);
             $$ = false_label;
         }
+    | IF LPAREN error RPAREN
+        {
+            $$ = quadruple_new_label();
+            yyerrok;
+        }
     ;
 
 switch_statement
@@ -1187,6 +1219,16 @@ switch_statement
         {
             begin_switch_context($3);
             free_expr($3);
+        }
+      scoped_lbrace switch_clause_list_opt RBRACE
+        {
+            finish_switch_context();
+            symbol_table_leave_scope();
+        }
+    | SWITCH LPAREN error RPAREN
+        {
+            begin_switch_context(NULL);
+            yyerrok;
         }
       scoped_lbrace switch_clause_list_opt RBRACE
         {
@@ -1214,6 +1256,10 @@ case_label
         {
             emit_switch_case_label($2);
         }
+    | CASE error COLON
+        {
+            yyerrok;
+        }
     | DEFAULT COLON
         {
             emit_switch_default_label();
@@ -1236,6 +1282,15 @@ iteration_statement
         {
             finish_while_loop($3);
         }
+    | WHILE LPAREN while_start error RPAREN
+        {
+            while_emit_condition($3, NULL);
+            yyerrok;
+        }
+      statement
+        {
+            finish_while_loop($3);
+        }
     | do_start statement WHILE LPAREN
         {
             begin_do_while_condition($1);
@@ -1243,6 +1298,15 @@ iteration_statement
       expression RPAREN SEMI
         {
             finish_do_while_loop($1, $6);
+        }
+    | do_start statement WHILE LPAREN
+        {
+            begin_do_while_condition($1);
+        }
+      error RPAREN SEMI
+        {
+            finish_do_while_loop($1, NULL);
+            yyerrok;
         }
     | FOR LPAREN for_start for_init
         {
@@ -1291,6 +1355,10 @@ for_init
         {
             free_expr($1);
         }
+    | error SEMI
+        {
+            yyerrok;
+        }
     ;
 
 for_cond
@@ -1298,12 +1366,22 @@ for_cond
         {
             $$ = $1;
         }
+    | error SEMI
+        {
+            $$ = NULL;
+            yyerrok;
+        }
     ;
 
 for_iter
     : expression_opt
         {
             $$ = $1;
+        }
+    | error
+        {
+            $$ = NULL;
+            yyerrok;
         }
     ;
 
