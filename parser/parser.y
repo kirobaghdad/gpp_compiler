@@ -1,17 +1,12 @@
 %code requires {
 #include "../semantic/symbol_table.h"
-#include "../quadruples/quadruples.h"
 
 typedef struct ExprInfo ExprInfo;
 typedef struct ArgumentList ArgumentList;
-typedef struct WhileContext WhileContext;
-typedef struct DoWhileContext DoWhileContext;
-typedef struct ForContext ForContext;
 }
 
 %{
 #include "../semantic/symbol_table.h"
-#include "../quadruples/quadruples.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,14 +31,13 @@ typedef struct {
 
 typedef struct ExprInfo ExprInfo;
 typedef struct ArgumentList ArgumentList;
-typedef struct WhileContext WhileContext;
-typedef struct DoWhileContext DoWhileContext;
-typedef struct ForContext ForContext;
 
 struct ExprInfo {
-    char *place;
     TypeKind type;
+    Symbol *symbol;
     int is_lvalue;
+    int is_valid;
+    int is_string_literal;
 };
 
 struct ArgumentList {
@@ -52,58 +46,13 @@ struct ArgumentList {
     size_t capacity;
 };
 
-struct WhileContext {
-    char *start_label;
-    char *end_label;
-};
-
-struct DoWhileContext {
-    char *start_label;
-    char *condition_label;
-    char *end_label;
-};
-
-struct ForContext {
-    char *condition_label;
-    char *body_label;
-    char *iteration_label;
-    char *end_label;
-};
-
-typedef struct BreakContext {
-    char *label;
-    struct BreakContext *next;
-} BreakContext;
-
-typedef struct ContinueContext {
-    char *label;
-    struct ContinueContext *next;
-} ContinueContext;
-
-typedef struct SwitchCase {
-    char *value;
-    char *label;
-    struct SwitchCase *next;
-} SwitchCase;
-
-typedef struct SwitchContext {
-    char *expression_place;
-    char *dispatch_label;
-    char *break_label;
-    char *default_label;
-    SwitchCase *cases_head;
-    SwitchCase *cases_tail;
-    struct SwitchContext *next;
-} SwitchContext;
-
 static TypeKind current_declaration_type = TYPE_INVALID;
 static int current_declaration_is_const = 0;
 static Symbol *pending_function_definition = NULL;
+static Symbol *current_function_symbol = NULL;
 static PendingFunctionSignature pending_function_signature = {0};
-static BreakContext *break_stack = NULL;
-static ContinueContext *continue_stack = NULL;
-static SwitchContext *switch_stack = NULL;
-static char *current_function_name = NULL;
+static int loop_depth = 0;
+static int switch_depth = 0;
 
 static void *checked_malloc(size_t size) {
     void *memory = malloc(size);
@@ -117,211 +66,36 @@ static void *checked_malloc(size_t size) {
 }
 
 static char *duplicate_text(const char *text) {
-    size_t length;
-    char *copy;
+    size_t length = strlen(text) + 1;
+    char *copy = checked_malloc(length);
 
-    if (!text) {
-        return NULL;
-    }
-
-    length = strlen(text) + 1;
-    copy = checked_malloc(length);
     memcpy(copy, text, length);
     return copy;
 }
 
-static char *format_integer(int value) {
-    int needed = snprintf(NULL, 0, "%d", value);
-    char *text = checked_malloc((size_t)needed + 1);
-
-    snprintf(text, (size_t)needed + 1, "%d", value);
-    return text;
-}
-
-static char *format_float_literal(float value) {
-    int needed = snprintf(NULL, 0, "%.6g", (double)value);
-    char *text = checked_malloc((size_t)needed + 1);
-
-    snprintf(text, (size_t)needed + 1, "%.6g", (double)value);
-    return text;
-}
-
-static ExprInfo *make_expr(char *place, TypeKind type, int is_lvalue) {
+static ExprInfo *make_expr(
+    TypeKind type,
+    Symbol *symbol,
+    int is_lvalue,
+    int is_valid,
+    int is_string_literal
+) {
     ExprInfo *expr = checked_malloc(sizeof(*expr));
 
-    expr->place = place;
     expr->type = type;
+    expr->symbol = symbol;
     expr->is_lvalue = is_lvalue;
+    expr->is_valid = is_valid;
+    expr->is_string_literal = is_string_literal;
     return expr;
 }
 
+static ExprInfo *make_invalid_expr(void) {
+    return make_expr(TYPE_INVALID, NULL, 0, 0, 0);
+}
+
 static void free_expr(ExprInfo *expr) {
-    if (!expr) {
-        return;
-    }
-
-    free(expr->place);
     free(expr);
-}
-
-static TypeKind merge_expression_types(TypeKind left, TypeKind right) {
-    if (left == TYPE_DOUBLE || right == TYPE_DOUBLE) {
-        return TYPE_DOUBLE;
-    }
-
-    if (left == TYPE_FLOAT || right == TYPE_FLOAT) {
-        return TYPE_FLOAT;
-    }
-
-    if (left == TYPE_INT || right == TYPE_INT) {
-        return TYPE_INT;
-    }
-
-    if (left == TYPE_CHAR || right == TYPE_CHAR) {
-        return TYPE_CHAR;
-    }
-
-    if (left == TYPE_BOOL || right == TYPE_BOOL) {
-        return TYPE_BOOL;
-    }
-
-    return TYPE_INVALID;
-}
-
-static ExprInfo *emit_binary_operation(const char *op, ExprInfo *left, ExprInfo *right) {
-    char *temp = quadruple_new_temp();
-    TypeKind type = merge_expression_types(
-        left ? left->type : TYPE_INVALID,
-        right ? right->type : TYPE_INVALID
-    );
-
-    quadruple_emit(op, left ? left->place : "-", right ? right->place : "-", temp);
-    free_expr(left);
-    free_expr(right);
-    return make_expr(temp, type, 0);
-}
-
-static ExprInfo *emit_unary_operation(const char *op, ExprInfo *operand) {
-    char *temp;
-    TypeKind type;
-
-    if (!operand) {
-        return NULL;
-    }
-
-    temp = quadruple_new_temp();
-    type = operand->type;
-
-    quadruple_emit(op, operand->place, "-", temp);
-    free_expr(operand);
-    return make_expr(temp, type, 0);
-}
-
-static const char *compound_assignment_operation(const char *assignment_op) {
-    if (strcmp(assignment_op, "ADD_ASSIGN") == 0) {
-        return "ADD";
-    }
-
-    if (strcmp(assignment_op, "SUB_ASSIGN") == 0) {
-        return "SUB";
-    }
-
-    if (strcmp(assignment_op, "MUL_ASSIGN") == 0) {
-        return "MUL";
-    }
-
-    if (strcmp(assignment_op, "DIV_ASSIGN") == 0) {
-        return "DIV";
-    }
-
-    if (strcmp(assignment_op, "MOD_ASSIGN") == 0) {
-        return "MOD";
-    }
-
-    return NULL;
-}
-
-static ExprInfo *emit_assignment_expression(
-    ExprInfo *target,
-    const char *assignment_op,
-    ExprInfo *value
-) {
-    char *result_place;
-    const char *compound_op;
-
-    if (!target || !value || !assignment_op) {
-        free_expr(target);
-        free_expr(value);
-        return NULL;
-    }
-
-    result_place = duplicate_text(target->place);
-    compound_op = compound_assignment_operation(assignment_op);
-
-    if (strcmp(assignment_op, "ASSIGN") == 0) {
-        quadruple_emit("ASSIGN", value->place, "-", target->place);
-    } else if (compound_op) {
-        char *temp = quadruple_new_temp();
-
-        quadruple_emit(compound_op, target->place, value->place, temp);
-        quadruple_emit("ASSIGN", temp, "-", target->place);
-        free(temp);
-    }
-
-    free_expr(target);
-    free_expr(value);
-    return make_expr(result_place, TYPE_INVALID, 0);
-}
-
-static ExprInfo *emit_increment_expression(ExprInfo *target, int delta, int is_prefix) {
-    char *updated_value;
-    char *result_place;
-    TypeKind type;
-
-    if (!target) {
-        return NULL;
-    }
-
-    updated_value = quadruple_new_temp();
-    result_place = NULL;
-
-    if (!is_prefix) {
-        result_place = quadruple_new_temp();
-        quadruple_emit("ASSIGN", target->place, "-", result_place);
-    }
-
-    quadruple_emit(delta > 0 ? "ADD" : "SUB", target->place, "1", updated_value);
-    quadruple_emit("ASSIGN", updated_value, "-", target->place);
-    free(updated_value);
-
-    if (is_prefix) {
-        result_place = duplicate_text(target->place);
-    }
-
-    type = target->type;
-    free_expr(target);
-    return make_expr(result_place, type, 0);
-}
-
-static ExprInfo *emit_index_expression(ExprInfo *base, ExprInfo *index) {
-    int needed;
-    char *place;
-    TypeKind type;
-
-    if (!base || !index) {
-        free_expr(base);
-        free_expr(index);
-        return NULL;
-    }
-
-    needed = snprintf(NULL, 0, "%s[%s]", base->place, index->place);
-    place = checked_malloc((size_t)needed + 1);
-    snprintf(place, (size_t)needed + 1, "%s[%s]", base->place, index->place);
-    type = base->type;
-
-    free_expr(base);
-    free_expr(index);
-    return make_expr(place, type, 1);
 }
 
 static ArgumentList *make_argument_list(ExprInfo *expr) {
@@ -376,45 +150,472 @@ static void free_argument_list(ArgumentList *arguments) {
     free(arguments);
 }
 
-static ExprInfo *emit_function_call(ExprInfo *callee, ArgumentList *arguments) {
-    Symbol *symbol;
-    TypeKind result_type;
-    char *argument_count;
-    char *result_place;
-    size_t index;
+static int is_numeric_type(TypeKind type) {
+    return
+        type == TYPE_INT ||
+        type == TYPE_FLOAT ||
+        type == TYPE_DOUBLE ||
+        type == TYPE_CHAR ||
+        type == TYPE_BOOL;
+}
 
-    if (!callee) {
-        free_argument_list(arguments);
-        return NULL;
+static int is_integer_like_type(TypeKind type) {
+    return type == TYPE_INT || type == TYPE_CHAR || type == TYPE_BOOL;
+}
+
+static int is_scalar_type(TypeKind type) {
+    return is_numeric_type(type);
+}
+
+static TypeKind merge_numeric_types(TypeKind left, TypeKind right) {
+    if (left == TYPE_DOUBLE || right == TYPE_DOUBLE) {
+        return TYPE_DOUBLE;
     }
 
-    symbol = symbol_table_lookup(callee->place);
-    result_type = symbol && symbol_kind(symbol) == SYMBOL_FUNCTION
-        ? symbol_type(symbol)
-        : TYPE_INVALID;
+    if (left == TYPE_FLOAT || right == TYPE_FLOAT) {
+        return TYPE_FLOAT;
+    }
 
-    if (arguments) {
-        for (index = 0; index < arguments->count; ++index) {
-            quadruple_emit("PARAM", arguments->items[index]->place, "-", "-");
+    if (left == TYPE_INT || right == TYPE_INT) {
+        return TYPE_INT;
+    }
+
+    if (left == TYPE_CHAR || right == TYPE_CHAR) {
+        return TYPE_CHAR;
+    }
+
+    if (left == TYPE_BOOL || right == TYPE_BOOL) {
+        return TYPE_BOOL;
+    }
+
+    return TYPE_INVALID;
+}
+
+static int types_assignable(TypeKind target, TypeKind source) {
+    if (target == TYPE_INVALID || source == TYPE_INVALID) {
+        return 0;
+    }
+
+    if (target == TYPE_VOID || source == TYPE_VOID) {
+        return 0;
+    }
+
+    if (target == source) {
+        return 1;
+    }
+
+    return is_scalar_type(target) && is_scalar_type(source);
+}
+
+static int expr_require_rvalue(ExprInfo *expr, const char *context) {
+    SymbolKind kind;
+
+    if (!expr || !expr->is_valid) {
+        return 0;
+    }
+
+    if (expr->is_string_literal) {
+        symbol_table_report_error(line_num, "string literal is not valid %s", context);
+        expr->is_valid = 0;
+        return 0;
+    }
+
+    if (!expr->symbol) {
+        return 1;
+    }
+
+    kind = symbol_kind(expr->symbol);
+
+    if (kind == SYMBOL_FUNCTION) {
+        symbol_table_report_error(
+            line_num,
+            "function '%s' cannot be used as a value without a call",
+            symbol_name(expr->symbol)
+        );
+        expr->is_valid = 0;
+        return 0;
+    }
+
+    if ((kind == SYMBOL_VARIABLE || kind == SYMBOL_PARAMETER) && !symbol_is_initialized(expr->symbol)) {
+        symbol_table_report_error(
+            line_num,
+            "variable '%s' used before being initialized",
+            symbol_name(expr->symbol)
+        );
+    }
+
+    symbol_mark_used(expr->symbol);
+    return 1;
+}
+
+static void validate_condition(ExprInfo *expr, const char *context) {
+    if (!expr_require_rvalue(expr, context)) {
+        return;
+    }
+
+    if (!is_scalar_type(expr->type)) {
+        symbol_table_report_error(
+            line_num,
+            "expression %s must have a scalar type, found '%s'",
+            context,
+            type_kind_name(expr->type)
+        );
+        expr->is_valid = 0;
+    }
+}
+
+static ExprInfo *validate_arithmetic_expression(
+    ExprInfo *left,
+    ExprInfo *right,
+    const char *context,
+    int require_integer
+) {
+    int valid = 1;
+    TypeKind result_type = TYPE_INVALID;
+
+    if (!expr_require_rvalue(left, context)) {
+        valid = 0;
+    }
+
+    if (!expr_require_rvalue(right, context)) {
+        valid = 0;
+    }
+
+    if (valid && (!is_numeric_type(left->type) || !is_numeric_type(right->type))) {
+        symbol_table_report_error(
+            line_num,
+            "%s requires numeric operands, found '%s' and '%s'",
+            context,
+            type_kind_name(left->type),
+            type_kind_name(right->type)
+        );
+        valid = 0;
+    }
+
+    if (valid && require_integer && (!is_integer_like_type(left->type) || !is_integer_like_type(right->type))) {
+        symbol_table_report_error(
+            line_num,
+            "%s requires integer-like operands, found '%s' and '%s'",
+            context,
+            type_kind_name(left->type),
+            type_kind_name(right->type)
+        );
+        valid = 0;
+    }
+
+    if (valid) {
+        result_type = merge_numeric_types(left->type, right->type);
+    }
+
+    free_expr(left);
+    free_expr(right);
+    return make_expr(result_type, NULL, 0, valid, 0);
+}
+
+static ExprInfo *validate_logical_expression(ExprInfo *left, ExprInfo *right, const char *context) {
+    int valid = 1;
+
+    if (!expr_require_rvalue(left, context)) {
+        valid = 0;
+    }
+
+    if (!expr_require_rvalue(right, context)) {
+        valid = 0;
+    }
+
+    if (valid && (!is_scalar_type(left->type) || !is_scalar_type(right->type))) {
+        symbol_table_report_error(
+            line_num,
+            "%s requires scalar operands, found '%s' and '%s'",
+            context,
+            type_kind_name(left->type),
+            type_kind_name(right->type)
+        );
+        valid = 0;
+    }
+
+    free_expr(left);
+    free_expr(right);
+    return make_expr(TYPE_BOOL, NULL, 0, valid, 0);
+}
+
+static ExprInfo *validate_unary_numeric_expression(ExprInfo *expr, const char *context) {
+    TypeKind result_type = TYPE_INVALID;
+    int valid = 1;
+
+    if (!expr_require_rvalue(expr, context)) {
+        valid = 0;
+    }
+
+    if (valid && !is_numeric_type(expr->type)) {
+        symbol_table_report_error(
+            line_num,
+            "%s requires a numeric operand, found '%s'",
+            context,
+            type_kind_name(expr->type)
+        );
+        valid = 0;
+    }
+
+    if (valid) {
+        result_type = expr->type;
+    }
+
+    free_expr(expr);
+    return make_expr(result_type, NULL, 0, valid, 0);
+}
+
+static ExprInfo *validate_not_expression(ExprInfo *expr) {
+    int valid = 1;
+
+    if (!expr_require_rvalue(expr, "for logical negation")) {
+        valid = 0;
+    }
+
+    if (valid && !is_scalar_type(expr->type)) {
+        symbol_table_report_error(
+            line_num,
+            "logical negation requires a scalar operand, found '%s'",
+            type_kind_name(expr->type)
+        );
+        valid = 0;
+    }
+
+    free_expr(expr);
+    return make_expr(TYPE_BOOL, NULL, 0, valid, 0);
+}
+
+static ExprInfo *validate_increment_expression(ExprInfo *expr, const char *context) {
+    TypeKind result_type = TYPE_INVALID;
+    Symbol *symbol = NULL;
+    int valid = 1;
+
+    if (!expr || !expr->is_valid) {
+        free_expr(expr);
+        return make_invalid_expr();
+    }
+
+    if (!expr->is_lvalue) {
+        symbol_table_report_error(line_num, "left-hand side of %s must be a modifiable lvalue", context);
+        valid = 0;
+    }
+
+    if (expr->symbol && symbol_is_const(expr->symbol)) {
+        symbol_table_report_error(
+            line_num,
+            "const variable '%s' cannot be modified using %s",
+            symbol_name(expr->symbol),
+            context
+        );
+        valid = 0;
+    }
+
+    if (!expr_require_rvalue(expr, context)) {
+        valid = 0;
+    }
+
+    if (valid && !is_numeric_type(expr->type)) {
+        symbol_table_report_error(
+            line_num,
+            "%s requires a numeric operand, found '%s'",
+            context,
+            type_kind_name(expr->type)
+        );
+        valid = 0;
+    }
+
+    if (valid && expr->symbol) {
+        symbol_mark_initialized(expr->symbol);
+    }
+
+    if (valid) {
+        result_type = expr->type;
+        symbol = expr->symbol;
+    }
+
+    free_expr(expr);
+    return make_expr(result_type, symbol, 0, valid, 0);
+}
+
+static ExprInfo *validate_assignment_expression(
+    ExprInfo *target,
+    const char *assignment_op,
+    ExprInfo *value
+) {
+    TypeKind result_type = TYPE_INVALID;
+    Symbol *target_symbol = NULL;
+    int valid = 1;
+    int is_compound = strcmp(assignment_op, "ASSIGN") != 0;
+
+    if (!target || !target->is_valid) {
+        valid = 0;
+    }
+
+    if (!value || !expr_require_rvalue(value, "on the right-hand side of assignment")) {
+        valid = 0;
+    }
+
+    if (!target || !target->is_lvalue) {
+        symbol_table_report_error(line_num, "left-hand side of assignment must be a modifiable lvalue");
+        valid = 0;
+    }
+
+    if (target && target->symbol && symbol_is_const(target->symbol)) {
+        symbol_table_report_error(
+            line_num,
+            "const variable '%s' cannot be reassigned",
+            symbol_name(target->symbol)
+        );
+        valid = 0;
+    }
+
+    if (is_compound && target && !expr_require_rvalue(target, "in compound assignment")) {
+        valid = 0;
+    }
+
+    if (valid && is_compound && (!is_numeric_type(target->type) || !is_numeric_type(value->type))) {
+        symbol_table_report_error(
+            line_num,
+            "compound assignment requires numeric operands, found '%s' and '%s'",
+            type_kind_name(target->type),
+            type_kind_name(value->type)
+        );
+        valid = 0;
+    }
+
+    if (
+        valid &&
+        is_compound &&
+        strcmp(assignment_op, "MOD_ASSIGN") == 0 &&
+        (!is_integer_like_type(target->type) || !is_integer_like_type(value->type))
+    ) {
+        symbol_table_report_error(
+            line_num,
+            "modulo assignment requires integer-like operands, found '%s' and '%s'",
+            type_kind_name(target->type),
+            type_kind_name(value->type)
+        );
+        valid = 0;
+    }
+
+    if (valid && !is_compound && !types_assignable(target->type, value->type)) {
+        symbol_table_report_error(
+            line_num,
+            "cannot assign value of type '%s' to '%s'",
+            type_kind_name(value->type),
+            type_kind_name(target->type)
+        );
+        valid = 0;
+    }
+
+    if (target && target->symbol) {
+        target_symbol = target->symbol;
+    }
+
+    if (valid && target_symbol) {
+        symbol_mark_initialized(target_symbol);
+        result_type = target->type;
+    }
+
+    free_expr(target);
+    free_expr(value);
+    return make_expr(result_type, target_symbol, 0, valid, 0);
+}
+
+static ExprInfo *validate_function_call(ExprInfo *callee, ArgumentList *arguments) {
+    Symbol *function_symbol = NULL;
+    TypeKind return_type = TYPE_INVALID;
+    size_t index;
+    int valid = 1;
+
+    if (!callee || !callee->is_valid) {
+        valid = 0;
+    } else if (!callee->symbol || symbol_kind(callee->symbol) != SYMBOL_FUNCTION) {
+        symbol_table_report_error(line_num, "called expression is not a function");
+        valid = 0;
+    } else {
+        function_symbol = callee->symbol;
+        return_type = symbol_type(function_symbol);
+        symbol_mark_used(function_symbol);
+    }
+
+    if (function_symbol) {
+        size_t argument_count = arguments ? arguments->count : 0;
+        size_t total_parameters = symbol_parameter_count(function_symbol);
+        size_t required_parameters = symbol_required_parameter_count(function_symbol);
+
+        if (argument_count < required_parameters || argument_count > total_parameters) {
+            symbol_table_report_error(
+                line_num,
+                "function '%s' expects between %lu and %lu arguments, but %lu were provided",
+                symbol_name(function_symbol),
+                (unsigned long)required_parameters,
+                (unsigned long)total_parameters,
+                (unsigned long)argument_count
+            );
+            valid = 0;
+        }
+
+        if (arguments) {
+            for (index = 0; index < arguments->count; ++index) {
+                if (!expr_require_rvalue(arguments->items[index], "as a function argument")) {
+                    valid = 0;
+                    continue;
+                }
+
+                if (
+                    index < total_parameters &&
+                    !types_assignable(symbol_parameter_type(function_symbol, index), arguments->items[index]->type)
+                ) {
+                    symbol_table_report_error(
+                        line_num,
+                        "argument %lu of function '%s' has type '%s', expected '%s'",
+                        (unsigned long)(index + 1),
+                        symbol_name(function_symbol),
+                        type_kind_name(arguments->items[index]->type),
+                        type_kind_name(symbol_parameter_type(function_symbol, index))
+                    );
+                    valid = 0;
+                }
+            }
         }
     }
 
-    argument_count = format_integer(arguments ? (int)arguments->count : 0);
-
-    if (result_type == TYPE_VOID) {
-        quadruple_emit("CALL", callee->place, argument_count, "-");
-        free(argument_count);
-        free_expr(callee);
-        free_argument_list(arguments);
-        return make_expr(duplicate_text("-"), TYPE_VOID, 0);
-    }
-
-    result_place = quadruple_new_temp();
-    quadruple_emit("CALL", callee->place, argument_count, result_place);
-    free(argument_count);
     free_expr(callee);
     free_argument_list(arguments);
-    return make_expr(result_place, result_type, 0);
+    return make_expr(return_type, NULL, 0, valid, 0);
+}
+
+static ExprInfo *validate_index_expression(ExprInfo *base, ExprInfo *index) {
+    TypeKind result_type = TYPE_INVALID;
+    Symbol *base_symbol = NULL;
+    int valid = 1;
+
+    if (!expr_require_rvalue(base, "as a subscripted expression")) {
+        valid = 0;
+    }
+
+    if (!expr_require_rvalue(index, "as an array index")) {
+        valid = 0;
+    }
+
+    if (valid && !is_integer_like_type(index->type)) {
+        symbol_table_report_error(
+            line_num,
+            "array index must be integer-like, found '%s'",
+            type_kind_name(index->type)
+        );
+        valid = 0;
+    }
+
+    if (valid) {
+        result_type = base->type;
+        base_symbol = base->symbol;
+    }
+
+    free_expr(base);
+    free_expr(index);
+    return make_expr(result_type, base_symbol, 1, valid, 0);
 }
 
 static void reset_pending_function_signature(void) {
@@ -448,6 +649,7 @@ static void add_pending_parameter(TypeKind type, const char *name, int has_defau
         new_capacity = pending_function_signature.parameter_capacity == 0
             ? 4
             : pending_function_signature.parameter_capacity * 2;
+
         parameters = realloc(
             pending_function_signature.parameters,
             new_capacity * sizeof(*parameters)
@@ -489,8 +691,8 @@ static void finish_declaration(void) {
     current_declaration_is_const = 0;
 }
 
-static void declare_current_variable(const char *name, int is_initialized) {
-    symbol_table_declare_variable(
+static Symbol *declare_current_variable(const char *name, int is_initialized) {
+    return symbol_table_declare_variable(
         name,
         current_declaration_type,
         current_declaration_is_const,
@@ -499,24 +701,14 @@ static void declare_current_variable(const char *name, int is_initialized) {
     );
 }
 
-static void begin_function_definition(Symbol *function_symbol) {
-    const char *function_name;
-
+static void prepare_function_definition(Symbol *function_symbol) {
     pending_function_definition = function_symbol;
+    current_function_symbol = function_symbol;
     symbol_table_mark_function_defined(function_symbol, line_num);
-
-    free(current_function_name);
-    function_name = symbol_name(function_symbol);
-    current_function_name = duplicate_text(function_name ? function_name : "anonymous");
-    quadruple_emit("FUNC_BEGIN", current_function_name, "-", "-");
 }
 
 static void finish_function_definition(void) {
-    if (current_function_name) {
-        quadruple_emit("FUNC_END", current_function_name, "-", "-");
-        free(current_function_name);
-        current_function_name = NULL;
-    }
+    current_function_symbol = NULL;
 }
 
 static void enter_compound_scope(void) {
@@ -527,328 +719,6 @@ static void enter_compound_scope(void) {
     }
 
     symbol_table_enter_block_scope();
-}
-
-static void push_break_label(char *label) {
-    BreakContext *context = checked_malloc(sizeof(*context));
-
-    context->label = label;
-    context->next = break_stack;
-    break_stack = context;
-}
-
-static void pop_break_label(void) {
-    BreakContext *context;
-
-    if (!break_stack) {
-        return;
-    }
-
-    context = break_stack;
-    break_stack = break_stack->next;
-    free(context);
-}
-
-static const char *current_break_label(void) {
-    return break_stack ? break_stack->label : NULL;
-}
-
-static void push_continue_label(char *label) {
-    ContinueContext *context = checked_malloc(sizeof(*context));
-
-    context->label = label;
-    context->next = continue_stack;
-    continue_stack = context;
-}
-
-static void pop_continue_label(void) {
-    ContinueContext *context;
-
-    if (!continue_stack) {
-        return;
-    }
-
-    context = continue_stack;
-    continue_stack = continue_stack->next;
-    free(context);
-}
-
-static const char *current_continue_label(void) {
-    return continue_stack ? continue_stack->label : NULL;
-}
-
-static WhileContext *begin_while_loop(void) {
-    WhileContext *context = checked_malloc(sizeof(*context));
-
-    context->start_label = quadruple_new_label();
-    context->end_label = quadruple_new_label();
-
-    quadruple_emit_label(context->start_label);
-    push_break_label(context->end_label);
-    push_continue_label(context->start_label);
-    return context;
-}
-
-static void while_emit_condition(WhileContext *context, ExprInfo *condition) {
-    if (context && condition) {
-        quadruple_emit("JMP_FALSE", condition->place, "-", context->end_label);
-    }
-
-    free_expr(condition);
-}
-
-static void finish_while_loop(WhileContext *context) {
-    if (!context) {
-        return;
-    }
-
-    quadruple_emit("JMP", "-", "-", context->start_label);
-    quadruple_emit_label(context->end_label);
-    pop_continue_label();
-    pop_break_label();
-
-    free(context->start_label);
-    free(context->end_label);
-    free(context);
-}
-
-static DoWhileContext *begin_do_while_loop(void) {
-    DoWhileContext *context = checked_malloc(sizeof(*context));
-
-    context->start_label = quadruple_new_label();
-    context->condition_label = quadruple_new_label();
-    context->end_label = quadruple_new_label();
-
-    quadruple_emit_label(context->start_label);
-    push_break_label(context->end_label);
-    push_continue_label(context->condition_label);
-    return context;
-}
-
-static void begin_do_while_condition(DoWhileContext *context) {
-    if (context) {
-        quadruple_emit_label(context->condition_label);
-    }
-}
-
-static void finish_do_while_loop(DoWhileContext *context, ExprInfo *condition) {
-    if (!context) {
-        free_expr(condition);
-        return;
-    }
-
-    if (condition) {
-        quadruple_emit("JMP_TRUE", condition->place, "-", context->start_label);
-    }
-
-    quadruple_emit_label(context->end_label);
-    pop_continue_label();
-    pop_break_label();
-
-    free_expr(condition);
-    free(context->start_label);
-    free(context->condition_label);
-    free(context->end_label);
-    free(context);
-}
-
-static ForContext *begin_for_loop(void) {
-    ForContext *context = checked_malloc(sizeof(*context));
-
-    context->condition_label = quadruple_new_label();
-    context->body_label = quadruple_new_label();
-    context->iteration_label = quadruple_new_label();
-    context->end_label = quadruple_new_label();
-
-    push_break_label(context->end_label);
-    push_continue_label(context->iteration_label);
-    return context;
-}
-
-static void for_after_init(ForContext *context) {
-    if (!context) {
-        return;
-    }
-
-    quadruple_emit("JMP", "-", "-", context->condition_label);
-    quadruple_emit_label(context->condition_label);
-}
-
-static void for_after_condition(ForContext *context, ExprInfo *condition) {
-    if (!context) {
-        free_expr(condition);
-        return;
-    }
-
-    if (condition) {
-        quadruple_emit("JMP_FALSE", condition->place, "-", context->end_label);
-    }
-
-    quadruple_emit("JMP", "-", "-", context->body_label);
-    quadruple_emit_label(context->iteration_label);
-    free_expr(condition);
-}
-
-static void for_after_iteration(ForContext *context, ExprInfo *iteration) {
-    if (!context) {
-        free_expr(iteration);
-        return;
-    }
-
-    free_expr(iteration);
-    quadruple_emit("JMP", "-", "-", context->condition_label);
-    quadruple_emit_label(context->body_label);
-}
-
-static void finish_for_loop(ForContext *context) {
-    if (!context) {
-        return;
-    }
-
-    quadruple_emit("JMP", "-", "-", context->iteration_label);
-    quadruple_emit_label(context->end_label);
-    pop_continue_label();
-    pop_break_label();
-
-    free(context->condition_label);
-    free(context->body_label);
-    free(context->iteration_label);
-    free(context->end_label);
-    free(context);
-}
-
-static void free_switch_cases(SwitchCase *cases) {
-    while (cases) {
-        SwitchCase *next_case = cases->next;
-
-        free(cases->value);
-        free(cases->label);
-        free(cases);
-        cases = next_case;
-    }
-}
-
-static void begin_switch_context(ExprInfo *expression) {
-    SwitchContext *context = checked_malloc(sizeof(*context));
-
-    context->expression_place = duplicate_text(expression ? expression->place : "-");
-    context->dispatch_label = quadruple_new_label();
-    context->break_label = quadruple_new_label();
-    context->default_label = NULL;
-    context->cases_head = NULL;
-    context->cases_tail = NULL;
-    context->next = switch_stack;
-    switch_stack = context;
-
-    push_break_label(context->break_label);
-    quadruple_emit("JMP", "-", "-", context->dispatch_label);
-}
-
-static SwitchContext *current_switch_context(void) {
-    return switch_stack;
-}
-
-static void emit_switch_case_label(ExprInfo *value) {
-    SwitchCase *switch_case;
-    SwitchContext *context = current_switch_context();
-
-    if (!context || !value) {
-        free_expr(value);
-        return;
-    }
-
-    switch_case = checked_malloc(sizeof(*switch_case));
-    switch_case->value = duplicate_text(value->place);
-    switch_case->label = quadruple_new_label();
-    switch_case->next = NULL;
-
-    if (!context->cases_head) {
-        context->cases_head = switch_case;
-    } else {
-        context->cases_tail->next = switch_case;
-    }
-
-    context->cases_tail = switch_case;
-    quadruple_emit_label(switch_case->label);
-    free_expr(value);
-}
-
-static void emit_switch_default_label(void) {
-    SwitchContext *context = current_switch_context();
-
-    if (!context) {
-        return;
-    }
-
-    if (!context->default_label) {
-        context->default_label = quadruple_new_label();
-    }
-
-    quadruple_emit_label(context->default_label);
-}
-
-static void finish_switch_context(void) {
-    SwitchCase *switch_case;
-    SwitchContext *context = switch_stack;
-
-    if (!context) {
-        return;
-    }
-
-    switch_stack = context->next;
-    quadruple_emit_label(context->dispatch_label);
-
-    for (switch_case = context->cases_head; switch_case; switch_case = switch_case->next) {
-        char *temp = quadruple_new_temp();
-
-        quadruple_emit("EQ", context->expression_place, switch_case->value, temp);
-        quadruple_emit("JMP_TRUE", temp, "-", switch_case->label);
-        free(temp);
-    }
-
-    quadruple_emit(
-        "JMP",
-        "-",
-        "-",
-        context->default_label ? context->default_label : context->break_label
-    );
-    quadruple_emit_label(context->break_label);
-    pop_break_label();
-
-    free(context->expression_place);
-    free(context->dispatch_label);
-    free(context->break_label);
-    free(context->default_label);
-    free_switch_cases(context->cases_head);
-    free(context);
-}
-
-static void cleanup_parser_state(void) {
-    while (break_stack) {
-        pop_break_label();
-    }
-
-    while (continue_stack) {
-        pop_continue_label();
-    }
-
-    while (switch_stack) {
-        SwitchContext *next_context = switch_stack->next;
-
-        free(switch_stack->expression_place);
-        free(switch_stack->dispatch_label);
-        free(switch_stack->break_label);
-        free(switch_stack->default_label);
-        free_switch_cases(switch_stack->cases_head);
-        free(switch_stack);
-        switch_stack = next_context;
-    }
-
-    free(current_function_name);
-    current_function_name = NULL;
-    pending_function_definition = NULL;
-    current_declaration_type = TYPE_INVALID;
-    current_declaration_is_const = 0;
 }
 %}
 
@@ -864,9 +734,6 @@ static void cleanup_parser_state(void) {
     Symbol* symbol;
     ExprInfo* expr;
     ArgumentList* args;
-    WhileContext* while_ctx;
-    DoWhileContext* do_while_ctx;
-    ForContext* for_ctx;
 }
 
 %token INT_TYPE
@@ -932,13 +799,9 @@ static void cleanup_parser_state(void) {
 %type <expr> assignment_expression logical_or_expression logical_and_expression
 %type <expr> equality_expression relational_expression additive_expression
 %type <expr> multiplicative_expression unary_expression postfix_expression
-%type <expr> primary_expression literal for_cond for_iter
+%type <expr> primary_expression literal
 %type <args> argument_expression_list argument_expression_list_opt
 %type <str> assignment_operator
-%type <str> if_guard
-%type <while_ctx> while_start
-%type <do_while_ctx> do_start
-%type <for_ctx> for_start
 
 %right ASSIGN ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
 %left OR_OP
@@ -966,12 +829,6 @@ external_declaration
     : function_definition
     | function_declaration SEMI
     | declaration SEMI
-    | error SEMI
-        {
-            finish_declaration();
-            reset_pending_function_signature();
-            yyerrok;
-        }
     ;
 
 function_header
@@ -989,7 +846,7 @@ function_header
 function_definition
     : function_header
         {
-            begin_function_definition($1);
+            prepare_function_definition($1);
         }
       compound_statement
         {
@@ -1004,11 +861,6 @@ function_declaration
 parameter_list_opt
     : /* empty */
     | parameter_list
-    | error
-        {
-            reset_pending_function_signature();
-            yyerrok;
-        }
     ;
 
 parameter_list
@@ -1024,6 +876,17 @@ parameter_declaration
         }
     | type_specifier IDENTIFIER ASSIGN expression
         {
+            if ($4 && expr_require_rvalue($4, "as a default parameter value") &&
+                !types_assignable($1, $4->type)) {
+                symbol_table_report_error(
+                    line_num,
+                    "default value for parameter '%s' has type '%s', expected '%s'",
+                    $2,
+                    type_kind_name($4->type),
+                    type_kind_name($1)
+                );
+            }
+
             add_pending_parameter($1, $2, 1);
             free($2);
             free_expr($4);
@@ -1076,11 +939,6 @@ declaration
         {
             finish_declaration();
         }
-    | type_specifier error
-        {
-            finish_declaration();
-            yyerrok;
-        }
     ;
 
 init_declarator_list
@@ -1096,18 +954,25 @@ init_declarator
         }
     | IDENTIFIER ASSIGN expression
         {
-            declare_current_variable($1, 1);
-            if ($3) {
-                quadruple_emit("ASSIGN", $3->place, "-", $1);
+            Symbol *symbol = declare_current_variable($1, 1);
+
+            if ($3 && expr_require_rvalue($3, "in variable initialization") &&
+                !types_assignable(current_declaration_type, $3->type)) {
+                symbol_table_report_error(
+                    line_num,
+                    "cannot initialize '%s' of type '%s' with value of type '%s'",
+                    $1,
+                    type_kind_name(current_declaration_type),
+                    type_kind_name($3->type)
+                );
             }
+
+            if (symbol && symbol_is_const(symbol) && !$3->is_valid) {
+                symbol_mark_initialized(symbol);
+            }
+
             free_expr($3);
             free($1);
-        }
-    | IDENTIFIER ASSIGN error
-        {
-            declare_current_variable($1, 0);
-            free($1);
-            yyerrok;
         }
     ;
 
@@ -1115,11 +980,6 @@ compound_statement
     : scoped_lbrace block_item_list_opt RBRACE
         {
             symbol_table_leave_scope();
-        }
-    | scoped_lbrace error RBRACE
-        {
-            symbol_table_leave_scope();
-            yyerrok;
         }
     ;
 
@@ -1173,67 +1033,30 @@ expression_opt
     ;
 
 selection_statement
-    : if_guard statement %prec LOWER_THAN_ELSE
+    : IF LPAREN expression RPAREN statement %prec LOWER_THAN_ELSE
         {
-            quadruple_emit_label($1);
-            free($1);
+            validate_condition($3, "in if condition");
+            free_expr($3);
         }
-    | if_guard statement ELSE
+    | IF LPAREN expression RPAREN statement ELSE statement
         {
-            char *end_label = quadruple_new_label();
-
-            quadruple_emit("JMP", "-", "-", end_label);
-            quadruple_emit_label($1);
-            free($1);
-            $<str>$ = end_label;
-        }
-      statement
-        {
-            quadruple_emit_label($<str>4);
-            free($<str>4);
+            validate_condition($3, "in if condition");
+            free_expr($3);
         }
     | switch_statement
-    ;
-
-if_guard
-    : IF LPAREN expression RPAREN
-        {
-            char *false_label = quadruple_new_label();
-
-            if ($3) {
-                quadruple_emit("JMP_FALSE", $3->place, "-", false_label);
-            }
-
-            free_expr($3);
-            $$ = false_label;
-        }
-    | IF LPAREN error RPAREN
-        {
-            $$ = quadruple_new_label();
-            yyerrok;
-        }
     ;
 
 switch_statement
     : SWITCH LPAREN expression RPAREN
         {
-            begin_switch_context($3);
+            validate_condition($3, "in switch expression");
             free_expr($3);
+            ++switch_depth;
         }
       scoped_lbrace switch_clause_list_opt RBRACE
         {
-            finish_switch_context();
             symbol_table_leave_scope();
-        }
-    | SWITCH LPAREN error RPAREN
-        {
-            begin_switch_context(NULL);
-            yyerrok;
-        }
-      scoped_lbrace switch_clause_list_opt RBRACE
-        {
-            finish_switch_context();
-            symbol_table_leave_scope();
+            --switch_depth;
         }
     ;
 
@@ -1254,16 +1077,23 @@ switch_clause
 case_label
     : CASE constant_expression COLON
         {
-            emit_switch_case_label($2);
-        }
-    | CASE error COLON
-        {
-            yyerrok;
+            if ($2) {
+                if (!expr_require_rvalue($2, "in case label")) {
+                    $2->is_valid = 0;
+                }
+
+                if ($2->is_valid && !is_integer_like_type($2->type)) {
+                    symbol_table_report_error(
+                        line_num,
+                        "case label must have an integer-like type, found '%s'",
+                        type_kind_name($2->type)
+                    );
+                }
+            }
+
+            free_expr($2);
         }
     | DEFAULT COLON
-        {
-            emit_switch_default_label();
-        }
     ;
 
 constant_expression
@@ -1274,78 +1104,38 @@ constant_expression
     ;
 
 iteration_statement
-    : WHILE LPAREN while_start expression RPAREN
+    : WHILE LPAREN expression RPAREN
         {
-            while_emit_condition($3, $4);
+            validate_condition($3, "in while condition");
+            free_expr($3);
+            ++loop_depth;
         }
       statement
         {
-            finish_while_loop($3);
+            --loop_depth;
         }
-    | WHILE LPAREN while_start error RPAREN
+    | DO
         {
-            while_emit_condition($3, NULL);
-            yyerrok;
+            ++loop_depth;
         }
-      statement
+      statement WHILE LPAREN expression RPAREN SEMI
         {
-            finish_while_loop($3);
+            validate_condition($6, "in do-while condition");
+            free_expr($6);
+            --loop_depth;
         }
-    | do_start statement WHILE LPAREN
-        {
-            begin_do_while_condition($1);
-        }
-      expression RPAREN SEMI
-        {
-            finish_do_while_loop($1, $6);
-        }
-    | do_start statement WHILE LPAREN
-        {
-            begin_do_while_condition($1);
-        }
-      error RPAREN SEMI
-        {
-            finish_do_while_loop($1, NULL);
-            yyerrok;
-        }
-    | FOR LPAREN for_start for_init
-        {
-            for_after_init($3);
-        }
-      for_cond
-        {
-            for_after_condition($3, $6);
-        }
-      for_iter RPAREN
-        {
-            for_after_iteration($3, $8);
-        }
-      statement
-        {
-            finish_for_loop($3);
-            symbol_table_leave_scope();
-        }
-    ;
-
-while_start
-    : /* empty */
-        {
-            $$ = begin_while_loop();
-        }
-    ;
-
-do_start
-    : DO
-        {
-            $$ = begin_do_while_loop();
-        }
-    ;
-
-for_start
-    : /* empty */
+    | FOR LPAREN
         {
             symbol_table_enter_block_scope();
-            $$ = begin_for_loop();
+        }
+      for_init for_cond for_iter RPAREN
+        {
+            ++loop_depth;
+        }
+      statement
+        {
+            --loop_depth;
+            symbol_table_leave_scope();
         }
     ;
 
@@ -1355,61 +1145,69 @@ for_init
         {
             free_expr($1);
         }
-    | error SEMI
-        {
-            yyerrok;
-        }
     ;
 
 for_cond
     : expression_opt SEMI
         {
-            $$ = $1;
-        }
-    | error SEMI
-        {
-            $$ = NULL;
-            yyerrok;
+            if ($1) {
+                validate_condition($1, "in for condition");
+            }
+
+            free_expr($1);
         }
     ;
 
 for_iter
     : expression_opt
         {
-            $$ = $1;
-        }
-    | error
-        {
-            $$ = NULL;
-            yyerrok;
+            free_expr($1);
         }
     ;
 
 jump_statement
     : BREAK SEMI
         {
-            const char *label = current_break_label();
-
-            if (label) {
-                quadruple_emit("JMP", "-", "-", label);
+            if (loop_depth == 0 && switch_depth == 0) {
+                symbol_table_report_error(line_num, "'break' used outside of loop or switch");
             }
         }
     | CONTINUE SEMI
         {
-            const char *label = current_continue_label();
-
-            if (label) {
-                quadruple_emit("JMP", "-", "-", label);
+            if (loop_depth == 0) {
+                symbol_table_report_error(line_num, "'continue' used outside of loop");
             }
         }
     | RETURN expression_opt SEMI
         {
-            quadruple_emit(
-                "RETURN",
-                $2 ? $2->place : "-",
-                "-",
-                current_function_name ? current_function_name : "-"
-            );
+            TypeKind return_type = current_function_symbol ? symbol_type(current_function_symbol) : TYPE_INVALID;
+
+            if (!current_function_symbol) {
+                symbol_table_report_error(line_num, "'return' used outside of a function");
+            } else if (return_type == TYPE_VOID) {
+                if ($2) {
+                    symbol_table_report_error(line_num, "void function '%s' must not return a value", symbol_name(current_function_symbol));
+                }
+            } else {
+                if (!$2) {
+                    symbol_table_report_error(
+                        line_num,
+                        "non-void function '%s' must return a value of type '%s'",
+                        symbol_name(current_function_symbol),
+                        type_kind_name(return_type)
+                    );
+                } else if (expr_require_rvalue($2, "in return statement") &&
+                           !types_assignable(return_type, $2->type)) {
+                    symbol_table_report_error(
+                        line_num,
+                        "function '%s' returns '%s' but value has type '%s'",
+                        symbol_name(current_function_symbol),
+                        type_kind_name(return_type),
+                        type_kind_name($2->type)
+                    );
+                }
+            }
+
             free_expr($2);
         }
     ;
@@ -1428,7 +1226,7 @@ assignment_expression
         }
     | unary_expression assignment_operator assignment_expression
         {
-            $$ = emit_assignment_expression($1, $2, $3);
+            $$ = validate_assignment_expression($1, $2, $3);
             free($2);
         }
     ;
@@ -1467,7 +1265,7 @@ logical_or_expression
         }
     | logical_or_expression OR_OP logical_and_expression
         {
-            $$ = emit_binary_operation("OR", $1, $3);
+            $$ = validate_logical_expression($1, $3, "logical OR");
         }
     ;
 
@@ -1478,7 +1276,7 @@ logical_and_expression
         }
     | logical_and_expression AND_OP equality_expression
         {
-            $$ = emit_binary_operation("AND", $1, $3);
+            $$ = validate_logical_expression($1, $3, "logical AND");
         }
     ;
 
@@ -1489,11 +1287,11 @@ equality_expression
         }
     | equality_expression EQ_OP relational_expression
         {
-            $$ = emit_binary_operation("EQ", $1, $3);
+            $$ = validate_logical_expression($1, $3, "equality comparison");
         }
     | equality_expression NE_OP relational_expression
         {
-            $$ = emit_binary_operation("NE", $1, $3);
+            $$ = validate_logical_expression($1, $3, "inequality comparison");
         }
     ;
 
@@ -1504,19 +1302,19 @@ relational_expression
         }
     | relational_expression LT_OP additive_expression
         {
-            $$ = emit_binary_operation("LT", $1, $3);
+            $$ = validate_logical_expression($1, $3, "relational comparison");
         }
     | relational_expression GT_OP additive_expression
         {
-            $$ = emit_binary_operation("GT", $1, $3);
+            $$ = validate_logical_expression($1, $3, "relational comparison");
         }
     | relational_expression LE_OP additive_expression
         {
-            $$ = emit_binary_operation("LE", $1, $3);
+            $$ = validate_logical_expression($1, $3, "relational comparison");
         }
     | relational_expression GE_OP additive_expression
         {
-            $$ = emit_binary_operation("GE", $1, $3);
+            $$ = validate_logical_expression($1, $3, "relational comparison");
         }
     ;
 
@@ -1527,11 +1325,11 @@ additive_expression
         }
     | additive_expression PLUS multiplicative_expression
         {
-            $$ = emit_binary_operation("ADD", $1, $3);
+            $$ = validate_arithmetic_expression($1, $3, "addition", 0);
         }
     | additive_expression MINUS multiplicative_expression
         {
-            $$ = emit_binary_operation("SUB", $1, $3);
+            $$ = validate_arithmetic_expression($1, $3, "subtraction", 0);
         }
     ;
 
@@ -1542,15 +1340,15 @@ multiplicative_expression
         }
     | multiplicative_expression MULT unary_expression
         {
-            $$ = emit_binary_operation("MUL", $1, $3);
+            $$ = validate_arithmetic_expression($1, $3, "multiplication", 0);
         }
     | multiplicative_expression DIV unary_expression
         {
-            $$ = emit_binary_operation("DIV", $1, $3);
+            $$ = validate_arithmetic_expression($1, $3, "division", 0);
         }
     | multiplicative_expression MOD unary_expression
         {
-            $$ = emit_binary_operation("MOD", $1, $3);
+            $$ = validate_arithmetic_expression($1, $3, "modulo", 1);
         }
     ;
 
@@ -1561,23 +1359,23 @@ unary_expression
         }
     | INC unary_expression
         {
-            $$ = emit_increment_expression($2, 1, 1);
+            $$ = validate_increment_expression($2, "prefix increment");
         }
     | DEC unary_expression
         {
-            $$ = emit_increment_expression($2, -1, 1);
+            $$ = validate_increment_expression($2, "prefix decrement");
         }
     | PLUS unary_expression
         {
-            $$ = $2;
+            $$ = validate_unary_numeric_expression($2, "unary plus");
         }
     | MINUS unary_expression %prec UMINUS
         {
-            $$ = emit_unary_operation("NEG", $2);
+            $$ = validate_unary_numeric_expression($2, "unary minus");
         }
     | NOT_OP unary_expression
         {
-            $$ = emit_unary_operation("NOT", $2);
+            $$ = validate_not_expression($2);
         }
     ;
 
@@ -1588,19 +1386,19 @@ postfix_expression
         }
     | postfix_expression INC
         {
-            $$ = emit_increment_expression($1, 1, 0);
+            $$ = validate_increment_expression($1, "postfix increment");
         }
     | postfix_expression DEC
         {
-            $$ = emit_increment_expression($1, -1, 0);
+            $$ = validate_increment_expression($1, "postfix decrement");
         }
     | postfix_expression LPAREN argument_expression_list_opt RPAREN
         {
-            $$ = emit_function_call($1, $3);
+            $$ = validate_function_call($1, $3);
         }
     | postfix_expression LBRACKET expression RBRACKET
         {
-            $$ = emit_index_expression($1, $3);
+            $$ = validate_index_expression($1, $3);
         }
     ;
 
@@ -1630,9 +1428,21 @@ primary_expression
     : IDENTIFIER
         {
             Symbol *symbol = symbol_table_lookup($1);
-            TypeKind type = symbol ? symbol_type(symbol) : TYPE_INVALID;
 
-            $$ = make_expr($1, type, 1);
+            if (!symbol) {
+                symbol_table_report_error(line_num, "undeclared identifier '%s'", $1);
+                free($1);
+                $$ = make_invalid_expr();
+            } else {
+                free($1);
+                $$ = make_expr(
+                    symbol_type(symbol),
+                    symbol,
+                    symbol_kind(symbol) != SYMBOL_FUNCTION,
+                    1,
+                    0
+                );
+            }
         }
     | literal
         {
@@ -1647,27 +1457,29 @@ primary_expression
 literal
     : INTEGER_LITERAL
         {
-            $$ = make_expr(format_integer($1), TYPE_INT, 0);
+            $$ = make_expr(TYPE_INT, NULL, 0, 1, 0);
         }
     | FLOAT_LITERAL
         {
-            $$ = make_expr(format_float_literal($1), TYPE_FLOAT, 0);
+            $$ = make_expr(TYPE_FLOAT, NULL, 0, 1, 0);
         }
     | CHAR_LITERAL
         {
-            $$ = make_expr($1, TYPE_CHAR, 0);
+            free($1);
+            $$ = make_expr(TYPE_CHAR, NULL, 0, 1, 0);
         }
     | STRING_LITERAL
         {
-            $$ = make_expr($1, TYPE_CHAR, 0);
+            free($1);
+            $$ = make_expr(TYPE_INVALID, NULL, 0, 1, 1);
         }
     | TRUE_KW
         {
-            $$ = make_expr(duplicate_text("true"), TYPE_BOOL, 0);
+            $$ = make_expr(TYPE_BOOL, NULL, 0, 1, 0);
         }
     | FALSE_KW
         {
-            $$ = make_expr(duplicate_text("false"), TYPE_BOOL, 0);
+            $$ = make_expr(TYPE_BOOL, NULL, 0, 1, 0);
         }
     ;
 
@@ -1677,14 +1489,12 @@ int main(int argc, char **argv) {
     int result;
 
     symbol_table_init();
-    quadruples_init();
 
     if (argc > 1) {
         yyin = fopen(argv[1], "r");
         if (!yyin) {
             perror(argv[1]);
             symbol_table_free();
-            quadruples_free();
             return 1;
         }
     }
@@ -1692,22 +1502,18 @@ int main(int argc, char **argv) {
     result = yyparse();
 
     if (result == 0) {
-        quadruples_print(stdout);
+        symbol_table_report_unused_variables();
         symbol_table_print(stdout);
     }
 
     if (result == 0 && error_count == 0 && symbol_table_error_count() == 0) {
         printf("Parsing completed successfully.\n");
-        cleanup_parser_state();
         reset_pending_function_signature();
         symbol_table_free();
-        quadruples_free();
         return 0;
     }
 
-    cleanup_parser_state();
     reset_pending_function_signature();
     symbol_table_free();
-    quadruples_free();
     return 1;
 }

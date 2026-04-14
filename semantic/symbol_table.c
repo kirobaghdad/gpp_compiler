@@ -38,6 +38,7 @@ static Scope *all_scopes_head = NULL;
 static Scope *all_scopes_tail = NULL;
 static int next_scope_id = 0;
 static int semantic_errors = 0;
+static int unused_report_done = 0;
 
 static void *checked_malloc(size_t size) {
     void *memory = malloc(size);
@@ -97,7 +98,7 @@ static ParameterInfo *copy_parameter_list(const ParameterInfo *parameters, size_
     return copy;
 }
 
-static void report_semantic_error(int line, const char *format, ...) {
+void symbol_table_report_error(int line, const char *format, ...) {
     va_list arguments;
 
     ++semantic_errors;
@@ -241,6 +242,7 @@ void symbol_table_init(void) {
 
     next_scope_id = 0;
     semantic_errors = 0;
+    unused_report_done = 0;
 
     global_scope = create_scope(SCOPE_GLOBAL, NULL, "global");
     current_scope = global_scope;
@@ -273,6 +275,7 @@ void symbol_table_free(void) {
     all_scopes_tail = NULL;
     next_scope_id = 0;
     semantic_errors = 0;
+    unused_report_done = 0;
 }
 
 const char *type_kind_name(TypeKind type) {
@@ -333,8 +336,12 @@ Symbol *symbol_table_declare_variable(
 
     existing = symbol_table_lookup_current_scope(name);
     if (existing) {
-        report_semantic_error(line, "redeclaration of '%s' in the same scope", name);
+        symbol_table_report_error(line, "redeclaration of '%s' in the same scope", name);
         return existing;
+    }
+
+    if (type == TYPE_VOID) {
+        symbol_table_report_error(line, "variable '%s' cannot have type void", name);
     }
 
     symbol = append_symbol(current_scope, name, SYMBOL_VARIABLE, type, line);
@@ -342,7 +349,7 @@ Symbol *symbol_table_declare_variable(
     symbol->is_initialized = is_initialized;
 
     if (is_const && !is_initialized) {
-        report_semantic_error(line, "const variable '%s' must be initialized", name);
+        symbol_table_report_error(line, "const variable '%s' must be initialized", name);
     }
 
     return symbol;
@@ -359,8 +366,12 @@ Symbol *symbol_table_declare_parameter(
 
     existing = symbol_table_lookup_current_scope(name);
     if (existing) {
-        report_semantic_error(line, "duplicate parameter name '%s'", name);
+        symbol_table_report_error(line, "duplicate parameter name '%s'", name);
         return existing;
+    }
+
+    if (type == TYPE_VOID) {
+        symbol_table_report_error(line, "parameter '%s' cannot have type void", name);
     }
 
     symbol = append_symbol(current_scope, name, SYMBOL_PARAMETER, type, line);
@@ -383,12 +394,12 @@ Symbol *symbol_table_declare_function(
     existing = find_symbol_in_scope(global_scope, name);
     if (existing) {
         if (existing->kind != SYMBOL_FUNCTION) {
-            report_semantic_error(line, "'%s' conflicts with an existing symbol", name);
+            symbol_table_report_error(line, "'%s' conflicts with an existing symbol", name);
             return existing;
         }
 
         if (!function_signatures_match(existing, return_type, parameters, parameter_count)) {
-            report_semantic_error(line, "conflicting declaration for function '%s'", name);
+            symbol_table_report_error(line, "conflicting declaration for function '%s'", name);
             return existing;
         }
 
@@ -412,7 +423,7 @@ void symbol_table_mark_function_defined(Symbol *function_symbol, int line) {
     }
 
     if (function_symbol->is_defined) {
-        report_semantic_error(line, "redefinition of function '%s'", function_symbol->name);
+        symbol_table_report_error(line, "redefinition of function '%s'", function_symbol->name);
         return;
     }
 
@@ -476,12 +487,93 @@ const char *symbol_name(const Symbol *symbol) {
     return symbol ? symbol->name : NULL;
 }
 
+SymbolKind symbol_kind(const Symbol *symbol) {
+    return symbol ? symbol->kind : SYMBOL_VARIABLE;
+}
+
 TypeKind symbol_type(const Symbol *symbol) {
     return symbol ? symbol->type : TYPE_INVALID;
 }
 
-SymbolKind symbol_kind(const Symbol *symbol) {
-    return symbol ? symbol->kind : SYMBOL_VARIABLE;
+int symbol_is_const(const Symbol *symbol) {
+    return symbol ? symbol->is_const : 0;
+}
+
+int symbol_is_initialized(const Symbol *symbol) {
+    return symbol ? symbol->is_initialized : 0;
+}
+
+int symbol_has_default_value(const Symbol *symbol) {
+    return symbol ? symbol->has_default_value : 0;
+}
+
+int symbol_is_defined(const Symbol *symbol) {
+    return symbol ? symbol->is_defined : 0;
+}
+
+size_t symbol_parameter_count(const Symbol *symbol) {
+    return symbol ? symbol->parameter_count : 0;
+}
+
+size_t symbol_required_parameter_count(const Symbol *symbol) {
+    size_t index;
+    size_t required_count = 0;
+
+    if (!symbol || symbol->kind != SYMBOL_FUNCTION) {
+        return 0;
+    }
+
+    for (index = 0; index < symbol->parameter_count; ++index) {
+        if (!symbol->parameters[index].has_default_value) {
+            ++required_count;
+        }
+    }
+
+    return required_count;
+}
+
+TypeKind symbol_parameter_type(const Symbol *symbol, size_t index) {
+    if (!symbol || symbol->kind != SYMBOL_FUNCTION || index >= symbol->parameter_count) {
+        return TYPE_INVALID;
+    }
+
+    return symbol->parameters[index].type;
+}
+
+void symbol_mark_used(Symbol *symbol) {
+    if (symbol) {
+        symbol->is_used = 1;
+    }
+}
+
+void symbol_mark_initialized(Symbol *symbol) {
+    if (symbol) {
+        symbol->is_initialized = 1;
+    }
+}
+
+void symbol_table_report_unused_variables(void) {
+    Scope *scope;
+
+    if (unused_report_done) {
+        return;
+    }
+
+    unused_report_done = 1;
+
+    for (scope = all_scopes_head; scope; scope = scope->next_all) {
+        Symbol *symbol;
+
+        for (symbol = scope->symbols_head; symbol; symbol = symbol->next_in_scope) {
+            if (symbol->kind == SYMBOL_VARIABLE && !symbol->is_used) {
+                symbol_table_report_error(
+                    symbol->line_declared,
+                    "unused variable '%s'",
+                    symbol->name
+                );
+            }
+        }
+    }
 }
 
 void symbol_table_print(FILE *stream) {
