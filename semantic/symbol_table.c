@@ -472,6 +472,18 @@ Symbol *symbol_table_lookup_current_scope(const char *name) {
     return find_symbol_in_scope(current_scope, name);
 }
 
+const char *symbol_name(const Symbol *symbol) {
+    return symbol ? symbol->name : NULL;
+}
+
+TypeKind symbol_type(const Symbol *symbol) {
+    return symbol ? symbol->type : TYPE_INVALID;
+}
+
+SymbolKind symbol_kind(const Symbol *symbol) {
+    return symbol ? symbol->kind : SYMBOL_VARIABLE;
+}
+
 void symbol_table_print(FILE *stream) {
     Scope *scope;
     int has_symbols = 0;
