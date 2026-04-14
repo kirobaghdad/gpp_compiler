@@ -9,8 +9,9 @@ PARSER_C := parser/yacc_tab.c
 PARSER_H := parser/yacc_tab.h
 LEXER_SRC := lexer/lexer.l
 LEXER_C := lexer/lex.yy.c
+SYMBOL_TABLE_SRC := semantic/symbol_table.c
 
-.PHONY: all clean run-valid run-parse-errors run-lex-errors
+.PHONY: all clean run-valid run-parse-errors run-lex-errors run-symbol-table run-symbol-table-errors
 
 all: $(TARGET)
 
@@ -20,8 +21,8 @@ $(PARSER_C) $(PARSER_H): $(PARSER_SRC)
 $(LEXER_C): $(LEXER_SRC) $(PARSER_H)
 	$(FLEX) -o $(LEXER_C) $(LEXER_SRC)
 
-$(TARGET): $(PARSER_C) $(LEXER_C)
-	$(CC) $(CFLAGS) -o $@ $(PARSER_C) $(LEXER_C) -lfl
+$(TARGET): $(PARSER_C) $(LEXER_C) $(SYMBOL_TABLE_SRC)
+	$(CC) $(CFLAGS) -o $@ $(PARSER_C) $(LEXER_C) $(SYMBOL_TABLE_SRC) -lfl
 
 run-valid: $(TARGET)
 	./$(TARGET) test/valid.gpp
@@ -31,6 +32,12 @@ run-parse-errors: $(TARGET)
 
 run-lex-errors: $(TARGET)
 	./$(TARGET) test/lex_err.gpp
+
+run-symbol-table: $(TARGET)
+	./$(TARGET) test/symbol_table_scopes.gpp
+
+run-symbol-table-errors: $(TARGET)
+	./$(TARGET) test/symbol_table_errors.gpp
 
 clean:
 	rm -f $(TARGET) parser_test my_lexer.o $(PARSER_C) $(PARSER_H) $(LEXER_C)

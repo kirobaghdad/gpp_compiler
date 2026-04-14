@@ -1,0 +1,28 @@
+int accumulate(int start, int step = 1) {
+    int total = start;
+
+    {
+        int total = 10;
+        int inner = total;
+    }
+
+    switch (start) {
+        case 0:
+            int branch = 5;
+            total = total + branch;
+            break;
+        default:
+            break;
+    }
+
+    for (int i = 0; i < 3; i++) {
+        int copy = total;
+    }
+
+    return total;
+}
+
+int main() {
+    int value = accumulate(1);
+    return value;
+}
