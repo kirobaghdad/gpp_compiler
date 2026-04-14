@@ -71,6 +71,10 @@ void symbol_table_leave_scope(void);
 Symbol *symbol_table_lookup(const char *name);
 Symbol *symbol_table_lookup_current_scope(const char *name);
 
+const char *symbol_name(const Symbol *symbol);
+TypeKind symbol_type(const Symbol *symbol);
+SymbolKind symbol_kind(const Symbol *symbol);
+
 void symbol_table_print(FILE *stream);
 int symbol_table_error_count(void);
 
