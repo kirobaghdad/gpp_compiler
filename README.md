@@ -1,56 +1,43 @@
-# GPP Compiler - Phase I
+# GPP Compiler
 
-This repository contains the Phase I submission for the CMP(N)403 compiler project. In this phase, the delivered components are the Flex lexer and the Bison parser for a simplified C++-like language subset.
+This repository contains the complete compiler project, featuring a simplified C++ compiler fully implemented with Lex/Yacc, accompanied by an interactive Web Graphical User Interface.
 
-## Included in Phase I
+## Project Features
 
-- Lexical analysis in [lexer/lexer.l](./lexer/lexer.l)
-- Syntax analysis in [parser/parser.y](./parser/parser.y)
-- Sample input files in [test](./test)
-- Submission report in [Phase_I_Report.md](./Phase_I_Report.md)
+- **Lexer & Parser:** Full lexical and syntax analysis using Flex and Bison.
+- **Symbol Table:** Dynamically scoping variable tracking.
+- **Quadruples:** Integrated Intermediate Representation emitted directly from AST traversal.
+- **Semantic Analyzer:** Detects initialization failures, scope errors, return types, and mutability constraints.
+- **Syntax Error Recovery:** Graceful parser continuation upon unexpected symbols.
 
 ## Supported Language Features
 
 - Primitive data types: `int`, `float`, `double`, `char`, `bool`, `void`
-- Variable and `const` declarations
+- Variable, `const` declarations, nested block scoping
 - Arithmetic, relational, logical, unary, and assignment expressions
-- Nested blocks and declarations inside blocks
-- `if`, `if-else`, `while`, `do-while`, `for`, and `switch`
-- `break`, `continue`, and `return`
-- Function definitions, function declarations, default parameters, and function calls
-- Array-style indexing and prefix/postfix increment and decrement
+- Control flow: `if`, `if-else`, `while`, `do-while`, `for`, `switch`, `break`, `continue`, `return`
+- Function definitions with default properties and parameters.
 
-## Build
+## CLI Build & Run
 
-Build from the repository root:
+Build the core `gpp_compiler` executable natively from the root:
 
 ```bash
 make
-```
-
-This generates `gpp_compiler` using:
-
-- `bison` for the parser
-- `flex` for the lexer
-- `gcc` for compilation and linking
-
-## Run
-
-```bash
 ./gpp_compiler test/valid.gpp
 ```
 
-Useful helper targets:
+## Interactive Web GUI 🚀
+
+The project also includes an aesthetic GUI wrapper allowing you to write code in a live editor and quickly visualize Quadruples, Symbol Tables, and generated Errors side-by-side.
+
+1. Ensure [Node.js](https://nodejs.org) is installed.
+2. Initialize and run the GUI backend:
 
 ```bash
-make run-valid
-make run-parse-errors
-make run-lex-errors
-make clean
+cd gui
+npm install
+node server.js
 ```
 
-## Notes
-
-- Phase I focuses on lexer and parser delivery only.
-- Symbol table generation, quadruples, semantic analysis, and extended error recovery are reserved for Phase II.
-- The parser accepts function prototypes and declarations directly inside `switch` cases to better match the required language subset.
+3. Open your browser and navigate to `http://localhost:3000`
