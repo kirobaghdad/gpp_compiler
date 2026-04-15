@@ -12,6 +12,40 @@ document.addEventListener('DOMContentLoaded', () => {
     return 0;
 }`;
 
+    // Enable actual Tab indentation inside the text editor
+    codeEditor.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+
+            // Insert 4 spaces at cursor
+            this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+
+            // Move cursor directly after the spaces
+            this.selectionStart = this.selectionEnd = start + 4;
+            updateLineNumbers(); // explicitly update since 'input' event might not fire on preventDefault
+        }
+    });
+
+    const lineNumbers = document.getElementById('lineNumbers');
+
+    function updateLineNumbers() {
+        const lineCount = codeEditor.value.split('\n').length;
+        // Generate a string with numbers from 1 to lineCount
+        lineNumbers.innerText = Array(lineCount).fill(0).map((_, i) => i + 1).join('\n');
+    }
+
+    codeEditor.addEventListener('input', updateLineNumbers);
+
+    // Sync scrolling exactly
+    codeEditor.addEventListener('scroll', () => {
+        lineNumbers.scrollTop = codeEditor.scrollTop;
+    });
+
+    // Initial render
+    updateLineNumbers();
+
     // Tab Switching Logic
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {

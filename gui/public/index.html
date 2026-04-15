@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>G++ Compiler Studio</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
@@ -12,7 +13,7 @@
         <!-- Header -->
         <header class="glass-header">
             <div class="logo">
-                <span class="logo-icon">⚡</span>
+                <img src="favicon.png" alt="Logo" class="logo-img">
                 <h1>G++ Compiler Studio</h1>
             </div>
             <button id="compileBtn" class="btn-primary">
@@ -29,7 +30,10 @@
                     <h2>Source Code</h2>
                     <span class="badge">test.gpp</span>
                 </div>
-                <textarea id="codeEditor" spellcheck="false" placeholder="Write your .gpp code here..."></textarea>
+                <div class="editor-wrapper">
+                    <div id="lineNumbers" class="line-numbers">1</div>
+                    <textarea id="codeEditor" spellcheck="false" wrap="off" placeholder="Write your .gpp code here..."></textarea>
+                </div>
             </section>
 
             <!-- Right: Results Panel -->
