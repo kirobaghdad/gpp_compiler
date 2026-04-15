@@ -12,7 +12,7 @@ LEXER_C := lexer/lex.yy.c
 SYMBOL_TABLE_SRC := semantic/symbol_table.c
 QUADRUPLES_SRC := quadruples/quadruples.c
 
-.PHONY: all clean run-valid run-parse-errors run-lex-errors run-symbol-table run-symbol-table-errors run-quadruples run-quadruples-control run-syntax-recovery
+.PHONY: all clean run-valid run-parse-errors run-lex-errors run-symbol-table run-symbol-table-errors run-quadruples run-quadruples-control run-syntax-recovery run-semantic-errors
 
 all: $(TARGET)
 
@@ -48,6 +48,9 @@ run-quadruples-control: $(TARGET)
 
 run-syntax-recovery: $(TARGET)
 	./$(TARGET) test/syntax_recovery.gpp
+
+run-semantic-errors: $(TARGET)
+	./$(TARGET) test/semantic_errors.gpp
 
 clean:
 	rm -f $(TARGET) parser_test my_lexer.o $(PARSER_C) $(PARSER_H) $(LEXER_C)

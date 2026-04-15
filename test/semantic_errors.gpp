@@ -1,0 +1,27 @@
+int sum(int a, int b = 1) {
+    const int c = 2;
+    c = 3;
+    return;
+}
+
+void logValue(int v) {
+    return v;
+}
+
+int main() {
+    int x;
+    int y = 0;
+    float z = 1.5;
+
+    x = y + undeclared;
+    5 = y;
+    y = "hello";
+    z %= 2.5;
+    y();
+    sum(x, z, 3);
+    logValue();
+    continue;
+    break;
+
+    return;
+}
