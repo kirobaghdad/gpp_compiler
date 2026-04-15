@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G++ Compiler Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="glass-header">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <h1>G++ Compiler Studio</h1>
+            </div>
+            <button id="compileBtn" class="btn-primary">
+                <span class="btn-text">Compile & Run</span>
+                <div class="loader hidden"></div>
+            </button>
+        </header>
+
+        <!-- Main Content (2 columns) -->
+        <main class="main-layout">
+            <!-- Left: Code Editor -->
+            <section class="editor-pane glass-panel">
+                <div class="pane-header">
+                    <h2>Source Code</h2>
+                    <span class="badge">test.gpp</span>
+                </div>
+                <textarea id="codeEditor" spellcheck="false" placeholder="Write your .gpp code here..."></textarea>
+            </section>
+
+            <!-- Right: Results Panel -->
+            <section class="results-pane glass-panel">
+                <div class="tabs-header">
+                    <button class="tab-btn active" data-tab="quadruples">Quadruples</button>
+                    <button class="tab-btn" data-tab="symbolTable">Symbol Table</button>
+                    <button class="tab-btn" data-tab="errors">Errors <span id="errorBadge" class="error-badge hidden">0</span></button>
+                </div>
+                
+                <div class="tabs-content">
+                    <!-- Quadruples Tab -->
+                    <div id="tab-quadruples" class="tab-panel active">
+                        <div class="empty-state">Run the compiler to view quadruples.</div>
+                        <div class="table-container hidden">
+                            <table class="data-table" id="quadTable">
+                                <thead>
+                                    <tr>
+                                        <th>Operator</th>
+                                        <th>Arg1</th>
+                                        <th>Arg2</th>
+                                        <th>Result / Dest</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Symbol Table Tab -->
+                    <div id="tab-symbolTable" class="tab-panel">
+                        <div class="empty-state">Run the compiler to view the symbol table.</div>
+                        <div class="table-container hidden">
+                            <pre id="rawSymbolTable" class="console-output"></pre>
+                        </div>
+                    </div>
+
+                    <!-- Errors Tab -->
+                    <div id="tab-errors" class="tab-panel">
+                        <div class="empty-state">Build is clean.</div>
+                        <div class="errors-list hidden" id="errorsList"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
