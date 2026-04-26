@@ -30,6 +30,7 @@ typedef struct ParameterInfo {
     char *name;
     TypeKind type;
     int has_default_value;
+    char *default_value;
 } ParameterInfo;
 
 typedef struct Symbol Symbol;
@@ -52,6 +53,7 @@ Symbol *symbol_table_declare_parameter(
     const char *name,
     TypeKind type,
     int has_default_value,
+    const char *default_value,
     int line
 );
 Symbol *symbol_table_declare_function(
@@ -83,6 +85,7 @@ int symbol_is_defined(const Symbol *symbol);
 size_t symbol_parameter_count(const Symbol *symbol);
 size_t symbol_required_parameter_count(const Symbol *symbol);
 TypeKind symbol_parameter_type(const Symbol *symbol, size_t index);
+const char *symbol_parameter_default_value(const Symbol *symbol, size_t index);
 void symbol_mark_used(Symbol *symbol);
 void symbol_mark_initialized(Symbol *symbol);
 void symbol_table_report_unused_variables(void);

@@ -9,3 +9,4 @@
 yacc_tab.c
 yacc_tab.h
 node_modules/
+.cache/

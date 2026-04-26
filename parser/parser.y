@@ -291,6 +291,70 @@ static int types_assignable(TypeKind target, TypeKind source) {
     return is_scalar_type(target) && is_scalar_type(source);
 }
 
+static const char *type_quad_name(TypeKind type) {
+    switch (type) {
+        case TYPE_INT:
+            return "INT";
+        case TYPE_FLOAT:
+            return "FLOAT";
+        case TYPE_DOUBLE:
+            return "DOUBLE";
+        case TYPE_CHAR:
+            return "CHAR";
+        case TYPE_BOOL:
+            return "BOOL";
+        case TYPE_VOID:
+            return "VOID";
+        case TYPE_INVALID:
+        default:
+            return "INVALID";
+    }
+}
+
+static char *format_conversion_op(TypeKind from, TypeKind to) {
+    int needed = snprintf(
+        NULL,
+        0,
+        "CAST_%s_TO_%s",
+        type_quad_name(from),
+        type_quad_name(to)
+    );
+    char *op = checked_malloc((size_t)needed + 1);
+
+    snprintf(
+        op,
+        (size_t)needed + 1,
+        "CAST_%s_TO_%s",
+        type_quad_name(from),
+        type_quad_name(to)
+    );
+    return op;
+}
+
+static void convert_expr_to_type(ExprInfo *expr, TypeKind target_type) {
+    char *op;
+    char *converted_place;
+
+    if (!expr || !expr->is_valid || expr->type == target_type) {
+        return;
+    }
+
+    if (!types_assignable(target_type, expr->type)) {
+        return;
+    }
+
+    op = format_conversion_op(expr->type, target_type);
+    converted_place = quadruple_new_temp();
+    quadruple_emit(op, expr->place, "-", converted_place);
+
+    free(op);
+    free(expr->place);
+    expr->place = converted_place;
+    expr->type = target_type;
+    expr->symbol = NULL;
+    expr->is_lvalue = 0;
+}
+
 static int expr_require_rvalue(ExprInfo *expr, const char *context) {
     SymbolKind kind;
 
@@ -345,6 +409,24 @@ static void validate_condition(ExprInfo *expr, const char *context) {
             type_kind_name(expr->type)
         );
         expr->is_valid = 0;
+        return;
+    }
+
+    convert_expr_to_type(expr, TYPE_BOOL);
+}
+
+static void validate_switch_expression(ExprInfo *expr) {
+    if (!expr_require_rvalue(expr, "in switch expression")) {
+        return;
+    }
+
+    if (!is_integer_like_type(expr->type)) {
+        symbol_table_report_error(
+            line_num,
+            "switch expression must have an integer-like type, found '%s'",
+            type_kind_name(expr->type)
+        );
+        expr->is_valid = 0;
     }
 }
 
@@ -391,6 +473,8 @@ static ExprInfo *validate_arithmetic_expression(
 
     if (valid) {
         result_type = merge_numeric_types(left->type, right->type);
+        convert_expr_to_type(left, result_type);
+        convert_expr_to_type(right, result_type);
         result_place = quadruple_new_temp();
         quadruple_emit(quad_op, left->place, right->place, result_place);
     }
@@ -434,6 +518,12 @@ static ExprInfo *validate_logical_expression(
     }
 
     if (valid) {
+        TypeKind operand_type = strcmp(quad_op, "AND") == 0 || strcmp(quad_op, "OR") == 0
+            ? TYPE_BOOL
+            : merge_numeric_types(left->type, right->type);
+
+        convert_expr_to_type(left, operand_type);
+        convert_expr_to_type(right, operand_type);
         result_place = quadruple_new_temp();
         quadruple_emit(quad_op, left->place, right->place, result_place);
     }
@@ -726,10 +816,12 @@ static ExprInfo *validate_assignment_expression(
         result_type = target->type;
 
         if (!is_compound) {
+            convert_expr_to_type(value, target->type);
             quadruple_emit("ASSIGN", value->place, "-", target->place);
         } else if (compound_op) {
             char *temp = quadruple_new_temp();
 
+            convert_expr_to_type(value, target->type);
             quadruple_emit(compound_op, target->place, value->place, temp);
             quadruple_emit("ASSIGN", temp, "-", target->place);
             free(temp);
@@ -814,12 +906,27 @@ static ExprInfo *validate_function_call(ExprInfo *callee, ArgumentList *argument
     }
 
     if (valid && function_symbol) {
-        char *argument_count = format_integer(arguments ? (int)arguments->count : 0);
+        size_t provided_count = arguments ? arguments->count : 0;
+        size_t total_parameters = symbol_parameter_count(function_symbol);
+        char *argument_count = format_integer((int)total_parameters);
 
         if (arguments) {
             for (index = 0; index < arguments->count; ++index) {
+                convert_expr_to_type(
+                    arguments->items[index],
+                    symbol_parameter_type(function_symbol, index)
+                );
                 quadruple_emit("PARAM", arguments->items[index]->place, "-", "-");
             }
+        }
+
+        for (index = provided_count; index < total_parameters; ++index) {
+            quadruple_emit(
+                "PARAM",
+                symbol_parameter_default_value(function_symbol, index),
+                "-",
+                "-"
+            );
         }
 
         if (return_type == TYPE_VOID) {
@@ -893,6 +1000,7 @@ static void discard_pending_parameters(void) {
 
     for (index = 0; index < pending_function_signature.parameter_count; ++index) {
         free(pending_function_signature.parameters[index].name);
+        free(pending_function_signature.parameters[index].default_value);
     }
 
     free(pending_function_signature.parameters);
@@ -914,7 +1022,12 @@ static void begin_function_signature(TypeKind return_type, const char *name) {
     pending_function_signature.name = duplicate_text(name);
 }
 
-static void add_pending_parameter(TypeKind type, const char *name, int has_default_value) {
+static void add_pending_parameter(
+    TypeKind type,
+    const char *name,
+    int has_default_value,
+    const char *default_value
+) {
     ParameterInfo *parameters;
     size_t new_capacity;
 
@@ -942,6 +1055,8 @@ static void add_pending_parameter(TypeKind type, const char *name, int has_defau
     pending_function_signature.parameters[pending_function_signature.parameter_count].type = type;
     pending_function_signature.parameters[pending_function_signature.parameter_count].has_default_value =
         has_default_value;
+    pending_function_signature.parameters[pending_function_signature.parameter_count].default_value =
+        duplicate_text(default_value);
     ++pending_function_signature.parameter_count;
 }
 
@@ -1228,6 +1343,20 @@ static SwitchContext *current_switch_context(void) {
     return switch_stack;
 }
 
+static int last_quadruple_is_jump_to(const char *label) {
+    const Quadruple *quadruple;
+
+    if (!label || quadruple_count() == 0) {
+        return 0;
+    }
+
+    quadruple = quadruple_at(quadruple_count() - 1);
+    return
+        quadruple &&
+        strcmp(quadruple->op, "JMP") == 0 &&
+        strcmp(quadruple->result, label) == 0;
+}
+
 static void emit_switch_case_label(ExprInfo *value) {
     SwitchCase *switch_case;
     SwitchContext *context = current_switch_context();
@@ -1276,6 +1405,11 @@ static void finish_switch_context(void) {
     }
 
     switch_stack = context->next;
+
+    if (!last_quadruple_is_jump_to(context->break_label)) {
+        quadruple_emit("JMP", "-", "-", context->break_label);
+    }
+
     quadruple_emit_label(context->dispatch_label);
 
     for (switch_case = context->cases_head; switch_case; switch_case = switch_case->next) {
@@ -1500,7 +1634,7 @@ parameter_list
 parameter_declaration
     : type_specifier IDENTIFIER
         {
-            add_pending_parameter($1, $2, 0);
+            add_pending_parameter($1, $2, 0, NULL);
             free($2);
         }
     | type_specifier IDENTIFIER ASSIGN expression
@@ -1516,7 +1650,11 @@ parameter_declaration
                 );
             }
 
-            add_pending_parameter($1, $2, 1);
+            if ($4 && $4->is_valid) {
+                convert_expr_to_type($4, $1);
+            }
+
+            add_pending_parameter($1, $2, 1, $4 && $4->is_valid ? $4->place : "-");
             free($2);
             free_expr($4);
         }
@@ -1602,6 +1740,7 @@ init_declarator
             }
 
             if ($3 && $3->is_valid) {
+                convert_expr_to_type($3, current_declaration_type);
                 quadruple_emit("ASSIGN", $3->place, "-", $1);
             } else if (symbol && symbol_is_const(symbol)) {
                 symbol_mark_initialized(symbol);
@@ -1732,7 +1871,7 @@ switch_statement
     : SWITCH LPAREN expression RPAREN
         {
             if ($3) {
-                validate_condition($3, "in switch expression");
+                validate_switch_expression($3);
             }
 
             begin_switch_context($3);
@@ -1982,6 +2121,10 @@ jump_statement
                         type_kind_name(return_type),
                         type_kind_name($2->type)
                     );
+                }
+
+                if ($2 && $2->is_valid) {
+                    convert_expr_to_type($2, return_type);
                 }
             }
 

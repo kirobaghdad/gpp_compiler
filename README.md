@@ -16,7 +16,7 @@ This repository contains the complete compiler project, featuring a simplified C
 - Variable, `const` declarations, nested block scoping
 - Arithmetic, relational, logical, unary, and assignment expressions
 - Control flow: `if`, `if-else`, `while`, `do-while`, `for`, `switch`, `break`, `continue`, `return`
-- Function definitions with default properties and parameters.
+- Function definitions, prototypes, parameters, default arguments, and recursion.
 
 ## CLI Build & Run
 

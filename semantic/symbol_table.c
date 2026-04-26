@@ -15,6 +15,7 @@ struct Symbol {
     int is_initialized;
     int is_used;
     int has_default_value;
+    char *default_value;
     int is_defined;
     ParameterInfo *parameters;
     size_t parameter_count;
@@ -74,6 +75,7 @@ static void free_parameter_list(ParameterInfo *parameters, size_t count) {
 
     for (index = 0; index < count; ++index) {
         free(parameters[index].name);
+        free(parameters[index].default_value);
     }
 
     free(parameters);
@@ -93,6 +95,7 @@ static ParameterInfo *copy_parameter_list(const ParameterInfo *parameters, size_
         copy[index].name = duplicate_string(parameters[index].name);
         copy[index].type = parameters[index].type;
         copy[index].has_default_value = parameters[index].has_default_value;
+        copy[index].default_value = duplicate_string(parameters[index].default_value);
     }
 
     return copy;
@@ -167,6 +170,7 @@ static Symbol *append_symbol(
     symbol->is_initialized = 0;
     symbol->is_used = 0;
     symbol->has_default_value = 0;
+    symbol->default_value = NULL;
     symbol->is_defined = 0;
     symbol->parameters = NULL;
     symbol->parameter_count = 0;
@@ -221,7 +225,13 @@ static void print_symbol_details(FILE *stream, const Symbol *symbol) {
             }
 
             if (symbol->parameters[index].has_default_value) {
-                fprintf(stream, " = default");
+                fprintf(
+                    stream,
+                    " = %s",
+                    symbol->parameters[index].default_value
+                        ? symbol->parameters[index].default_value
+                        : "default"
+                );
             }
         }
 
@@ -230,7 +240,7 @@ static void print_symbol_details(FILE *stream, const Symbol *symbol) {
     }
 
     if (symbol->kind == SYMBOL_PARAMETER && symbol->has_default_value) {
-        fprintf(stream, "default argument");
+        fprintf(stream, "default argument = %s", symbol->default_value ? symbol->default_value : "default");
         return;
     }
 
@@ -259,6 +269,7 @@ void symbol_table_free(void) {
             Symbol *next_symbol = symbol->next_in_scope;
 
             free(symbol->name);
+            free(symbol->default_value);
             free_parameter_list(symbol->parameters, symbol->parameter_count);
             free(symbol);
             symbol = next_symbol;
@@ -359,6 +370,7 @@ Symbol *symbol_table_declare_parameter(
     const char *name,
     TypeKind type,
     int has_default_value,
+    const char *default_value,
     int line
 ) {
     Symbol *existing;
@@ -377,6 +389,8 @@ Symbol *symbol_table_declare_parameter(
     symbol = append_symbol(current_scope, name, SYMBOL_PARAMETER, type, line);
     symbol->is_initialized = 1;
     symbol->has_default_value = has_default_value;
+    symbol->default_value = duplicate_string(default_value);
+
     return symbol;
 }
 
@@ -452,6 +466,7 @@ void symbol_table_enter_function_scope(Symbol *function_symbol) {
             function_symbol->parameters[index].name,
             function_symbol->parameters[index].type,
             function_symbol->parameters[index].has_default_value,
+            function_symbol->parameters[index].default_value,
             function_symbol->line_declared
         );
     }
@@ -538,6 +553,14 @@ TypeKind symbol_parameter_type(const Symbol *symbol, size_t index) {
     }
 
     return symbol->parameters[index].type;
+}
+
+const char *symbol_parameter_default_value(const Symbol *symbol, size_t index) {
+    if (!symbol || symbol->kind != SYMBOL_FUNCTION || index >= symbol->parameter_count) {
+        return NULL;
+    }
+
+    return symbol->parameters[index].default_value;
 }
 
 void symbol_mark_used(Symbol *symbol) {
