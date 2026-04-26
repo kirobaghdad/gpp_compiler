@@ -1,0 +1,39 @@
+int main() {
+    int sum = 0;
+    int i = 0;
+
+    while (i < 5) {
+        i++;
+
+        if (i == 2) {
+            continue;
+        }
+
+        sum = sum + i;
+    }
+
+    do {
+        sum = sum - 1;
+    } while (sum > 10);
+
+    for (int j = 0; j < 4; j++) {
+        if (j == 3) {
+            break;
+        }
+
+        sum = sum + j;
+    }
+
+    switch (sum) {
+        case 8:
+            sum = sum + 10;
+            break;
+        case 9:
+            sum = sum + 20;
+        default:
+            sum = sum + 1;
+            break;
+    }
+
+    return sum;
+}

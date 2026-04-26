@@ -1,0 +1,24 @@
+int scale(int value, int factor = 2);
+
+int scale(int value, int factor = 2) {
+    return value * factor;
+}
+
+int main() {
+    const int base = 5;
+    int x = base;
+    int y = 3, z = 0;
+    float ratio = 1.5;
+    double total = x + ratio;
+    bool ok = true;
+
+    z = scale(x) + y;
+
+    if (ok && z > 0) {
+        z = z + total;
+    } else {
+        z = z - 1;
+    }
+
+    return z;
+}

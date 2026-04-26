@@ -1,0 +1,30 @@
+int square(int x) {
+    return x * x;
+}
+
+int sumWithDefault(int x, int y = 4) {
+    int result = x + y;
+    return result;
+}
+
+int factorial(int n) {
+    if (n <= 1) {
+        return 1;
+    }
+
+    return n * factorial(n - 1);
+}
+
+int main() {
+    int value = 3;
+    int result = square(value);
+
+    {
+        int value = 5;
+        int scoped = sumWithDefault(value);
+        result = result + scoped;
+    }
+
+    result = result + factorial(4);
+    return result;
+}

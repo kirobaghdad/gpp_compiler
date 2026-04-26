@@ -1,0 +1,26 @@
+int main() {
+    int a = 10;
+    int b = 3;
+    int sum = a + b;
+    int diff = a - b;
+    int product = a * b;
+    int quotient = a / b;
+    int remainder = a % b;
+    int prefix = ++a;
+    int postfix = b--;
+    bool comparison = sum > diff && product != quotient;
+    bool logic = comparison || !(remainder == 0);
+    int total = sum + diff + product + quotient + remainder + prefix + postfix;
+
+    total += 2;
+    total -= 1;
+    total *= 2;
+    total /= 2;
+    total %= 100;
+
+    if (logic) {
+        total = total + 1;
+    }
+
+    return total;
+}

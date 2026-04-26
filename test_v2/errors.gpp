@@ -1,0 +1,34 @@
+int add(int a, int b = 1) {
+    const int c = 2;
+    c = 3;
+    return;
+}
+
+void logValue(int value) {
+    return value;
+}
+
+int main() {
+    int x;
+    int x = 2;
+    const int y;
+
+    undeclared = 5;
+    10 = x;
+    int badText = "text";
+
+    float f = 1.5;
+    f %= 2.0;
+
+    x = add(1, 2, 3);
+    logValue();
+
+    continue;
+    break;
+
+    if (x > ) {
+        x = 1;
+    }
+
+    return;
+}
