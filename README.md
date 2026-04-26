@@ -20,11 +20,11 @@ This repository contains the complete compiler project, featuring a simplified C
 
 ## CLI Build & Run
 
-Build the core `gpp_compiler` executable natively from the root:
+Build the core `gpp` executable natively from the root:
 
 ```bash
 make
-./gpp_compiler test/valid.gpp
+./gpp test/valid.gpp
 ```
 
 ## Interactive Web GUI 🚀

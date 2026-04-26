@@ -3,7 +3,7 @@ BISON := bison
 FLEX := flex
 CFLAGS := -Wall -Wextra -std=c11 -D_POSIX_C_SOURCE=200809L
 
-TARGET := gpp_compiler
+TARGET := gpp
 PARSER_SRC := parser/parser.y
 PARSER_C := parser/yacc_tab.c
 PARSER_H := parser/yacc_tab.h
@@ -53,4 +53,4 @@ run-semantic-errors: $(TARGET)
 	./$(TARGET) test/semantic_errors.gpp
 
 clean:
-	rm -f $(TARGET) parser_test my_lexer.o $(PARSER_C) $(PARSER_H) $(LEXER_C)
+	rm -f $(TARGET) gpp_compiler parser_test my_lexer.o $(PARSER_C) $(PARSER_H) $(LEXER_C)

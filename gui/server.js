@@ -24,7 +24,7 @@ app.post('/api/compile', (req, res) => {
         }
 
         // Execute compiler
-        const compilerPath = path.resolve(__dirname, '../gpp_compiler');
+        const compilerPath = path.resolve(__dirname, '../gpp');
         
         exec(`"${compilerPath}" "${tempFilePath}"`, (error, stdout, stderr) => {
             // Compiler returns non-zero if there are errors, so we handle both stdout and stderr
