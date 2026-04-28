@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     const compileBtn = document.getElementById('compileBtn');
+    const fileUpload = document.getElementById('fileUpload');
     const codeEditor = document.getElementById('codeEditor');
+    const fileNameBadge = document.getElementById('fileNameBadge');
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabPanels = document.querySelectorAll('.tab-panel');
     const errorBadge = document.getElementById('errorBadge');
@@ -45,6 +47,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial render
     updateLineNumbers();
+
+    fileUpload.addEventListener('change', () => {
+        const file = fileUpload.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            codeEditor.value = reader.result;
+            fileNameBadge.textContent = file.name;
+            updateLineNumbers();
+        };
+        reader.readAsText(file);
+    });
 
     // Tab Switching Logic
     tabBtns.forEach(btn => {

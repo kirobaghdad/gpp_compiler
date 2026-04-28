@@ -16,10 +16,14 @@
                 <img src="favicon.png" alt="Logo" class="logo-img">
                 <h1>G++ Compiler Studio</h1>
             </div>
-            <button id="compileBtn" class="btn-primary">
-                <span class="btn-text">Compile & Run</span>
-                <div class="loader hidden"></div>
-            </button>
+            <div class="header-actions">
+                <label for="fileUpload" class="btn-secondary">Upload .gpp</label>
+                <input id="fileUpload" class="file-input" type="file" accept=".gpp,text/plain">
+                <button id="compileBtn" class="btn-primary">
+                    <span class="btn-text">Compile & Run</span>
+                    <div class="loader hidden"></div>
+                </button>
+            </div>
         </header>
 
         <!-- Main Content (2 columns) -->
@@ -28,7 +32,7 @@
             <section class="editor-pane glass-panel">
                 <div class="pane-header">
                     <h2>Source Code</h2>
-                    <span class="badge">test.gpp</span>
+                    <span id="fileNameBadge" class="badge">test.gpp</span>
                 </div>
                 <div class="editor-wrapper">
                     <div id="lineNumbers" class="line-numbers">1</div>
