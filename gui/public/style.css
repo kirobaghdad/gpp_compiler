@@ -330,6 +330,15 @@ h1 {
     font-weight: 600;
 }
 
+.symbol-table {
+    min-width: 980px;
+}
+
+.symbol-table th,
+.symbol-table td {
+    white-space: nowrap;
+}
+
 /* Raw Console output */
 .console-output {
     font-family: var(--font-mono);

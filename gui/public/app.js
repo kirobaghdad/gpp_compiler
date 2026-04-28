@@ -146,11 +146,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Render Symbol Table
         const symTab = document.getElementById('tab-symbolTable');
+        const symTable = document.getElementById('symTable').querySelector('tbody');
         symTab.querySelector('.empty-state').classList.add('hidden');
         symTab.querySelector('.table-container').classList.remove('hidden');
-        
-        const rawSym = document.getElementById('rawSymbolTable');
-        rawSym.textContent = data.symbolTable || "Symbol table is empty.";
+        symTable.innerHTML = '';
+
+        const symbolRows = parseSymbolTable(data.symbolTable || '');
+        symbolRows.forEach(row => {
+            const tr = document.createElement('tr');
+            row.forEach(value => {
+                const td = document.createElement('td');
+                td.textContent = value;
+                tr.appendChild(td);
+            });
+            symTable.appendChild(tr);
+        });
+
+        if (symTable.innerHTML === '') {
+            symTable.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted)">Symbol table is empty.</td></tr>';
+        }
 
         // Render Errors
         const errTab = document.getElementById('tab-errors');
@@ -189,5 +203,30 @@ document.addEventListener('DOMContentLoaded', () => {
             // Auto switch to quadruples if it was a successful build
             document.querySelector('.tab-btn[data-tab="quadruples"]').click();
         }
+    }
+
+    function parseSymbolTable(symbolTable) {
+        return symbolTable
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line && !line.startsWith('ID ') && !line.startsWith('-----'))
+            .map(line => {
+                const parts = line.split(/\s+/);
+                if (parts.length < 9) return null;
+
+                return [
+                    parts[0],
+                    parts[1],
+                    parts[2],
+                    parts[3],
+                    parts[4],
+                    parts[5],
+                    parts[6],
+                    parts[7],
+                    parts[8],
+                    parts.slice(9).join(' ') || '-'
+                ];
+            })
+            .filter(Boolean);
     }
 });

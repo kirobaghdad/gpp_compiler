@@ -71,7 +71,23 @@
                     <div id="tab-symbolTable" class="tab-panel">
                         <div class="empty-state">Run the compiler to view the symbol table.</div>
                         <div class="table-container hidden">
-                            <pre id="rawSymbolTable" class="console-output"></pre>
+                            <table class="data-table symbol-table" id="symTable">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Depth</th>
+                                        <th>Scope</th>
+                                        <th>Name</th>
+                                        <th>Kind</th>
+                                        <th>Type</th>
+                                        <th>Const</th>
+                                        <th>Initialized</th>
+                                        <th>Line</th>
+                                        <th>Details</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
                     </div>
 
