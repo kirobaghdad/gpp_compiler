@@ -4,6 +4,25 @@ int add(int a, int b = 1) {
     return;
 }
 
+int broken(int a, int a) {
+    return a;
+}
+
+int conflict(int value);
+float conflict(int value);
+
+int again() {
+    return 1;
+}
+
+int again() {
+    return 2;
+}
+
+void badParam(void value) {
+    return;
+}
+
 void logValue(int value) {
     return value;
 }
@@ -19,6 +38,12 @@ int main() {
 
     float f = 1.5;
     f %= 2.0;
+
+    switch (f) {
+        case 1.5:
+            x = 1;
+            break;
+    }
 
     x = add(1, 2, 3);
     logValue();

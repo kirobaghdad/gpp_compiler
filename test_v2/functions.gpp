@@ -7,6 +7,15 @@ int sumWithDefault(int x, int y = 4) {
     return result;
 }
 
+void storeResult(int value) {
+    int last = value;
+    if (last > 0) {
+        return;
+    }
+
+    return;
+}
+
 int factorial(int n) {
     if (n <= 1) {
         return 1;
@@ -22,9 +31,14 @@ int main() {
     {
         int value = 5;
         int scoped = sumWithDefault(value);
+        {
+            int value = sumWithDefault(scoped, 2);
+            result = result + value;
+        }
         result = result + scoped;
     }
 
     result = result + factorial(4);
+    storeResult(result);
     return result;
 }

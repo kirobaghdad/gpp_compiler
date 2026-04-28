@@ -6,11 +6,15 @@ int main() {
     int product = a * b;
     int quotient = a / b;
     int remainder = a % b;
+    int negative = -a;
+    int positive = +b;
     int prefix = ++a;
     int postfix = b--;
     bool comparison = sum > diff && product != quotient;
+    bool bounds = sum >= diff && quotient <= product;
+    bool equal = a == b || a < b;
     bool logic = comparison || !(remainder == 0);
-    int total = sum + diff + product + quotient + remainder + prefix + postfix;
+    int total = sum + diff + product + quotient + remainder + negative + positive + prefix + postfix;
 
     total += 2;
     total -= 1;
@@ -18,7 +22,7 @@ int main() {
     total /= 2;
     total %= 100;
 
-    if (logic) {
+    if (logic && bounds && !equal) {
         total = total + 1;
     }
 

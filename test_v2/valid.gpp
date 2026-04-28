@@ -1,18 +1,31 @@
 int scale(int value, int factor = 2);
 
+int mix(int count, float ratio, bool enabled = true);
+
 int scale(int value, int factor = 2) {
     return value * factor;
+}
+
+int mix(int count, float ratio, bool enabled = true) {
+    if (enabled) {
+        return count + ratio;
+    }
+
+    return count;
 }
 
 int main() {
     const int base = 5;
     int x = base;
     int y = 3, z = 0;
+    char letter = 'A';
     float ratio = 1.5;
     double total = x + ratio;
     bool ok = true;
 
     z = scale(x) + y;
+    z = z + scale(x, 3);
+    z = z + mix(letter, ratio, ok);
 
     if (ok && z > 0) {
         z = z + total;

@@ -26,7 +26,8 @@ int main() {
 
     switch (sum) {
         case 8:
-            sum = sum + 10;
+            int bonus = 10;
+            sum = sum + bonus;
             break;
         case 9:
             sum = sum + 20;
