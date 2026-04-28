@@ -3,6 +3,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileUpload = document.getElementById('fileUpload');
     const codeEditor = document.getElementById('codeEditor');
     const fileNameBadge = document.getElementById('fileNameBadge');
+    const mainLayout = document.querySelector('.main-layout');
+    const editorPane = document.querySelector('.editor-pane');
+    const resultsPane = document.querySelector('.results-pane');
+    const splitter = document.getElementById('splitter');
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabPanels = document.querySelectorAll('.tab-panel');
     const errorBadge = document.getElementById('errorBadge');
@@ -59,6 +63,30 @@ document.addEventListener('DOMContentLoaded', () => {
             updateLineNumbers();
         };
         reader.readAsText(file);
+    });
+
+    splitter.addEventListener('mousedown', () => {
+        document.body.classList.add('resizing');
+    });
+
+    document.addEventListener('mousemove', (event) => {
+        if (!document.body.classList.contains('resizing')) return;
+
+        const bounds = mainLayout.getBoundingClientRect();
+        const minPaneWidth = 320;
+        const splitterWidth = splitter.offsetWidth;
+        const maxLeftWidth = bounds.width - minPaneWidth - splitterWidth;
+        const leftWidth = Math.min(
+            Math.max(event.clientX - bounds.left, minPaneWidth),
+            maxLeftWidth
+        );
+
+        editorPane.style.flex = `0 0 ${leftWidth}px`;
+        resultsPane.style.flex = '1 1 auto';
+    });
+
+    document.addEventListener('mouseup', () => {
+        document.body.classList.remove('resizing');
     });
 
     // Tab Switching Logic
